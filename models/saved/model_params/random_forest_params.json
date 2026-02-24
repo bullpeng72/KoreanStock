@@ -1,0 +1,17 @@
+{
+  "parameters": {
+    "n_estimators": 200,
+    "max_depth": 15,
+    "min_samples_split": 5,
+    "min_samples_leaf": 2
+  },
+  "retraining_result": {
+    "model_name": "random_forest",
+    "success": true,
+    "training_samples": 905,
+    "training_duration": 74.9049274916363,
+    "performance_improvement": 0.14452250405232867
+  },
+  "saved_at": "2025-07-19T15:05:30.448397",
+  "model_version": "random_forest_v20250719_150530"
+}

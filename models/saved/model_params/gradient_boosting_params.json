@@ -1,0 +1,17 @@
+{
+  "parameters": {
+    "n_estimators": 150,
+    "learning_rate": 0.1,
+    "max_depth": 6,
+    "subsample": 0.8
+  },
+  "retraining_result": {
+    "model_name": "gradient_boosting",
+    "success": true,
+    "training_samples": 905,
+    "training_duration": 48.3322703546031,
+    "performance_improvement": 0.08575112437662272
+  },
+  "saved_at": "2025-07-19T15:05:30.456645",
+  "model_version": "gradient_boosting_v20250719_150530"
+}

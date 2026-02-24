@@ -1,0 +1,35 @@
+# Web Framework & UI
+streamlit>=1.30.0
+streamlit-option-menu
+streamlit-aggrid
+
+# Data Processing & Analysis
+numpy>=1.24.0,<2.0.0
+pandas>=2.1.0
+scikit-learn==1.3.2
+joblib
+scipy
+
+# Financial Data & Analysis
+yfinance>=0.2.30
+finance-datareader>=0.9.50
+ta>=0.11.0
+
+# Machine Learning
+xgboost>=2.0.0
+
+# Visualization
+plotly>=5.18.0
+matplotlib>=3.8.0
+
+# AI/LLM
+openai>=1.10.0
+httpx
+
+# Web Scraping & HTTP
+requests>=2.31.0
+beautifulsoup4>=4.12.2
+
+# Utilities
+schedule
+python-dotenv

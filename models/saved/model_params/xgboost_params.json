@@ -1,0 +1,18 @@
+{
+  "parameters": {
+    "n_estimators": 200,
+    "max_depth": 6,
+    "learning_rate": 0.1,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8
+  },
+  "retraining_result": {
+    "model_name": "xgboost",
+    "success": true,
+    "training_samples": 905,
+    "training_duration": 73.7898993022818,
+    "performance_improvement": 0.12567703848850345
+  },
+  "saved_at": "2025-07-19T15:05:30.462628",
+  "model_version": "xgboost_v20250719_150530"
+}

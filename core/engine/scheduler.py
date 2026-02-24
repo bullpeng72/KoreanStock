@@ -1,0 +1,41 @@
+import logging
+import time
+from datetime import datetime
+from core.data.provider import data_provider
+from core.data.database import db_manager
+from core.engine.recommendation_agent import recommendation_agent
+from core.utils.notifier import notifier
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+def run_daily_update():
+    """매일 수행할 자동화 작업: 데이터 갱신 및 유망 종목 알림"""
+    logger.info("Starting daily automated update...")
+    
+    try:
+        # 1. 시장 종목 리스트 갱신 및 DB 저장
+        logger.info("Updating stock list...")
+        stocks = data_provider.get_stock_list()
+        db_manager.save_stocks(stocks)
+        
+        # 2. 유망 종목 분석 및 추천 생성
+        # recommendation_agent.get_recommendations 내부에서 분석 및 DB 저장이 수행됨
+        logger.info("Analyzing market for recommendations...")
+        recs = recommendation_agent.get_recommendations(limit=5)
+        
+        # 3. 텔레그램 알림 전송
+        if recs:
+            logger.info(f"Sending notifications for {len(recs)} stocks...")
+            notifier.notify_recommendation(recs)
+        else:
+            logger.info("No high-score recommendations found today.")
+            
+        logger.info("Daily update completed successfully.")
+        
+    except Exception as e:
+        logger.error(f"Error during daily update: {e}")
+        notifier.send_message(f"❌ **자동 갱신 오류 발생:** {str(e)}")
+
+if __name__ == "__main__":
+    run_daily_update()
