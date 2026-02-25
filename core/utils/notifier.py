@@ -68,7 +68,7 @@ class TelegramNotifier:
             lines.append(
                 f"{i}. {icon} <b>{rec.get('name', rec.get('code', ''))} ({rec.get('code', '')})</b> — {action}\n"
                 f"   점수: Tech {rec.get('tech_score','?')} · ML {rec.get('ml_score','?')} · News {rec.get('sentiment_score','?')} ({sentiment_label})\n"
-                f"   목표가: {price_line}\n"
+                f"   목표가(4주): {price_line}\n"
                 f"   {ai.get('summary', '')}"
             )
 

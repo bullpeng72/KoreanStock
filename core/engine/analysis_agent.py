@@ -29,20 +29,29 @@ class AnalysisAgent:
         # 2. 기술적 지표 계산
         df_with_indicators = indicators.calculate_all(df)
         tech_score = indicators.get_composite_score(df_with_indicators)
-        
-        # 3. ML 예측 점수 산출 (이미 계산된 지표 재활용, 모델 없으면 tech_score 폴백)
-        from core.engine.prediction_model import prediction_model
-        ml_res = prediction_model.predict(code, df, df_with_indicators=df_with_indicators, fallback_score=tech_score)
-        ml_score = ml_res.get("ensemble_score", tech_score)
-        
-        # 4. 뉴스 감성 분석
+
+        # 3. 뉴스 감성 분석 (ML 예측보다 먼저 수행하여 블렌딩에 활용)
         from core.engine.news_agent import news_agent
         news_res = news_agent.get_sentiment_score(name or code)
         sentiment_score = news_res.get("sentiment_score", 0)
-        
-        # 5. AI 분석 (최근 데이터 + ML 점수 + 뉴스 점수 기반)
+
+        # 4. ML 예측 점수 산출 (순수 ML 앙상블; sentiment 블렌딩은 composite 단계에서 일원화)
+        from core.engine.prediction_model import prediction_model
+        ml_res = prediction_model.predict(
+            code, df,
+            df_with_indicators=df_with_indicators,
+            fallback_score=tech_score,
+        )
+        ml_raw_score   = ml_res.get("ensemble_score", tech_score)   # 순수 ML 앙상블 점수
+        ml_model_count = ml_res.get("model_count", 0)               # 활성 모델 수 (composite 가중치 분기용)
+
+        # 참고용: ML + 뉴스 감성 블렌딩 점수 (composite 계산에는 미사용, 표시 전용)
+        _sentiment_norm_ref = max(0.0, min(100.0, (sentiment_score + 100.0) / 2.0))
+        ml_blended = round(0.65 * ml_raw_score + 0.35 * _sentiment_norm_ref, 2)
+
+        # 5. AI 분석 (최근 데이터 + 순수 ML 점수 + 뉴스 점수 기반)
         current_price = float(df_with_indicators.iloc[-1]['close'])
-        ai_opinion = self._get_ai_opinion(name or code, df_with_indicators.tail(30), tech_score, ml_score, news_res, current_price)
+        ai_opinion = self._get_ai_opinion(name or code, df_with_indicators.tail(30), tech_score, ml_raw_score, news_res, current_price)
         
         # 6. 결과 정리
         latest = df_with_indicators.iloc[-1]
@@ -52,7 +61,9 @@ class AnalysisAgent:
             "current_price": float(latest['close']),
             "change_pct": float(latest['change']) * 100 if 'change' in latest else 0.0,
             "tech_score": tech_score,
-            "ml_score": round(ml_score, 2),
+            "ml_score":       round(ml_raw_score, 2),    # 순수 ML 앙상블 (composite 계산용)
+            "ml_blended":     ml_blended,               # ML + 감성 블렌딩 참고값 (표시 전용)
+            "ml_model_count": ml_model_count,           # 활성 모델 수 (0이면 fallback)
             "sentiment_score": sentiment_score,
             "sentiment_info": news_res,
             "stats": {
@@ -100,7 +111,7 @@ class AnalysisAgent:
 
             [점수 해석 기준]
             - 기술적 점수: 0~39 약세, 40~59 중립, 60~79 강세, 80~100 매우 강세
-            - ML 점수: 0~39 하락 예상, 40~59 중립, 60~100 상승 예상
+            - ML 점수: 향후 5거래일 크로스섹셔널 순위 예측 (0=전체 최하위 상대강도, 50=평균, 100=전체 최상위)
             - 뉴스 감성: -100~-50 매우 부정, -49~-1 부정, 0 중립, 1~50 긍정, 51~100 매우 긍정
 
             [정량 점수]
@@ -128,15 +139,19 @@ class AnalysisAgent:
                 "weakness": "약점 (최대 2개)",
                 "reasoning": "기술적 지표, ML 예측, 뉴스 심리를 모두 반영한 상세 추천 사유",
                 "action": "BUY, HOLD, SELL 중 하나 (영문 대문자)",
-                "target_price": "단기 목표가 (숫자만, 현재가 기준으로 BUY면 현재가 이상, SELL이면 현재가 이하로 설정)",
+                "target_price": "4주(20거래일) 목표가 (숫자만, 현재가 기준으로 BUY면 현재가 이상, SELL이면 현재가 이하로 설정)",
                 "target_rationale": "목표가 산출의 구체적 근거"
             }}
             """
 
             response = self.client.chat.completions.create(
                 model=config.DEFAULT_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"}
+                messages=[
+                    {"role": "system", "content": "당신은 한국 주식 시장 전문 퀀트 애널리스트입니다. 제공된 정량 데이터에 근거하여 객관적이고 일관된 투자 분석을 JSON 형식으로만 제공합니다."},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.3,
             )
             result = json.loads(response.choices[0].message.content)
 
@@ -152,18 +167,18 @@ class AnalysisAgent:
             if current_price > 0 and result.get('target_price', 0) > 0:
                 tp = result['target_price']
                 action = result.get('action', 'HOLD')
-                if action == 'BUY' and tp < current_price:
-                    # 매수 의견인데 목표가가 현재가 미만 → 5% 상향 조정
-                    result['target_price'] = int(current_price * 1.05)
-                    logger.warning(f"[{name}] BUY but target_price < current_price. Auto-adjusted to {result['target_price']}")
-                elif action == 'HOLD' and tp < current_price * 0.97:
-                    # HOLD인데 목표가가 현재가 대비 3% 이상 하락 → SELL로 변경
+                if action == 'BUY' and tp < current_price * 0.98:
+                    # 매수 의견인데 목표가가 현재가 대비 2% 이상 낮음 → 3% 상향 조정
+                    result['target_price'] = int(current_price * 1.03)
+                    logger.warning(f"[{name}] BUY but target_price below current. Auto-adjusted to {result['target_price']}")
+                elif action == 'HOLD' and tp < current_price * 0.92:
+                    # HOLD인데 목표가가 현재가 대비 8% 이상 하락 → SELL로 변경 (기존 3% → 8%)
                     result['action'] = 'SELL'
-                    logger.warning(f"[{name}] HOLD but target_price significantly below current_price. Changed action to SELL.")
-                elif action == 'SELL' and tp > current_price:
-                    # 매도 의견인데 목표가가 현재가 초과 → 5% 하향 조정
-                    result['target_price'] = int(current_price * 0.95)
-                    logger.warning(f"[{name}] SELL but target_price > current_price. Auto-adjusted to {result['target_price']}")
+                    logger.warning(f"[{name}] HOLD but target_price significantly below current. Changed action to SELL.")
+                elif action == 'SELL' and tp > current_price * 1.02:
+                    # 매도 의견인데 목표가가 현재가 대비 2% 이상 높음 → 3% 하향 조정
+                    result['target_price'] = int(current_price * 0.97)
+                    logger.warning(f"[{name}] SELL but target_price above current. Auto-adjusted to {result['target_price']}")
 
             return result
         except Exception as e:

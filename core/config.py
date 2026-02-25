@@ -4,6 +4,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Config:
+    # Version
+    VERSION = "0.2.0"
+
     # Project Root
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

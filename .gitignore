@@ -35,6 +35,3 @@ wheels/
 models/saved/prediction_models/*.pkl
 models/saved/model_params/*.json
 
-# Skills (local dev files)
-tech-debt-analyzer/
-tech-debt-analyzer.skill

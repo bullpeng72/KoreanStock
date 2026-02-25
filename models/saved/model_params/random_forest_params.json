@@ -1,17 +1,16 @@
 {
   "parameters": {
-    "n_estimators": 200,
-    "max_depth": 15,
-    "min_samples_split": 5,
-    "min_samples_leaf": 2
+    "n_estimators": 300,
+    "max_depth": 4,
+    "min_samples_split": 20,
+    "min_samples_leaf": 15,
+    "max_features": 0.5
   },
-  "retraining_result": {
-    "model_name": "random_forest",
-    "success": true,
-    "training_samples": 905,
-    "training_duration": 74.9049274916363,
-    "performance_improvement": 0.14452250405232867
-  },
-  "saved_at": "2025-07-19T15:05:30.448397",
-  "model_version": "random_forest_v20250719_150530"
+  "training_samples": 12360,
+  "test_rmse": 28.9013,
+  "test_r2": -0.003,
+  "training_duration": 0.9,
+  "performance_improvement": -0.15,
+  "saved_at": "2026-02-25T09:46:52.403736",
+  "model_version": "random_forest_v20260225_094652"
 }

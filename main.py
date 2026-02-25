@@ -20,6 +20,7 @@ def main():
     
     st.sidebar.markdown("---")
     st.sidebar.info("AI와 ML을 결합한 한국 주식 분석 시스템입니다.")
+    st.sidebar.caption(f"v{config.VERSION}")
 
     if choice == "Dashboard":
         show_dashboard()
@@ -111,7 +112,29 @@ def show_watchlist():
                                 st.write(f"- BB 위치: {res['indicators']['bb_pos']} (0에 가까울수록 하단)")
 
                         st.write(f"**상세 사유:** {res['ai_opinion']['reasoning']}")
-                        st.success(f"🎯 **목표가:** {int(res['ai_opinion']['target_price']):,}원 ({res['ai_opinion'].get('target_rationale', '')})")
+                        st.success(f"🎯 **목표가(4주):** {int(res['ai_opinion']['target_price']):,}원 ({res['ai_opinion'].get('target_rationale', '')})")
+
+                        # 관련 뉴스 기사 목록
+                        news_info = res.get('sentiment_info', {})
+                        articles  = news_info.get('articles', [])
+                        top_news  = news_info.get('top_news', '')
+                        n_display = len(articles) if articles else (1 if top_news else 0)
+                        if n_display:
+                            with st.expander(f"📰 관련 뉴스 ({n_display}건)"):
+                                if news_info.get('reason'):
+                                    st.caption(f"💬 AI 종합: {news_info['reason']}")
+                                if articles:
+                                    for art in articles[:8]:
+                                        url   = art.get('originallink') or art.get('link', '')
+                                        title = art.get('title', '제목 없음')
+                                        age   = art.get('days_ago', '')
+                                        badge = f"  `{age}`" if age else ""
+                                        if url:
+                                            st.markdown(f"- [{title}]({url}){badge}")
+                                        else:
+                                            st.markdown(f"- {title}{badge}")
+                                elif top_news:
+                                    st.markdown(f"- {top_news}")
                     else:
                         st.error(res['error'])
 
@@ -192,7 +215,11 @@ def show_backtest_viewer():
             if df.empty:
                 st.error("데이터를 불러올 수 없습니다.")
                 return
-            
+
+            stock_list = data_provider.get_stock_list()
+            matched = stock_list[stock_list['code'] == stock_code]
+            stock_name = matched.iloc[0]['name'] if not matched.empty else stock_code
+
             df = indicators.calculate_all(df)
             
             # 2. 전략 시그널 생성
@@ -206,6 +233,7 @@ def show_backtest_viewer():
                 return
 
             # 4. 결과 표시 (Metric)
+            st.subheader(f"{stock_name} ({stock_code})")
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("총 수익률", f"{res['total_return_pct']}%", 
                       help="투자 기간 동안의 누적 복리 수익률입니다. 수수료와 세금이 포함된 실전 수익률입니다.")
@@ -225,7 +253,7 @@ def show_backtest_viewer():
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=res['daily_results'].index, y=res['daily_results']['cum_returns'],
                                      mode='lines', name='Strategy Cumulative Returns'))
-            fig.update_layout(title=f"{stock_code} {strategy_name} Strategy Performance",
+            fig.update_layout(title=f"{stock_name} ({stock_code}) · {strategy_name} Strategy Performance",
                               xaxis_title="Date", yaxis_title="Cumulative Return (Base 1.0)",
                               template="plotly_dark")
             st.plotly_chart(fig, width='stretch')
@@ -307,7 +335,7 @@ def show_dashboard():
                 )
                 label = (
                     f"{icon} {r.get('name', r.get('code',''))} ({r.get('code','')})  |  "
-                    f"종합점수: {score}  |  목표가: {int(r.get('ai_opinion',{}).get('target_price',0)):,}원"
+                    f"종합점수: {score}  |  목표가(4주): {int(r.get('ai_opinion',{}).get('target_price',0)):,}원"
                 )
                 with st.expander(label):
                     render_recommendation_card(r, key_prefix=f"dash_{r.get('code','')}_{selected_dash_date}")
@@ -373,11 +401,9 @@ def render_recommendation_card(rec: dict, key_prefix: str = "rec"):
         sentiment_color = "green" if sentiment_score > 0 else "red" if sentiment_score < 0 else "gray"
         sentiment_label = sentiment_info.get('sentiment_label', 'Neutral')
         st.markdown("**📰 뉴스 심리**")
-        st.markdown(f":{sentiment_color}[{sentiment_score} ({sentiment_label})]")
-        if sentiment_info.get('top_news'):
-            st.caption(f"주요 뉴스: {sentiment_info['top_news']}")
+        st.markdown(f":{sentiment_color}[{sentiment_score} · {sentiment_label}]")
         if sentiment_info.get('reason'):
-            st.caption(f"근거: {sentiment_info['reason']}")
+            st.caption(sentiment_info['reason'])
 
     with right:
         st.markdown("**🤖 AI 분석 요약**")
@@ -397,11 +423,33 @@ def render_recommendation_card(rec: dict, key_prefix: str = "rec"):
                 current_price = int(rec.get('current_price', 0))
                 upside = round((target_price - current_price) / current_price * 100, 1) if current_price else 0
                 upside_str = f"(+{upside}%)" if upside >= 0 else f"({upside}%)"
-                st.success(f"🎯 **목표가: {target_price:,}원** {upside_str}")
+                st.success(f"🎯 **목표가(4주): {target_price:,}원** {upside_str}")
                 if ai.get('target_rationale'):
                     st.caption(f"근거: {ai['target_rationale']}")
         except (ValueError, TypeError):
             pass
+
+    # ── 관련 뉴스 기사 목록 (전체 너비) ─────────────────────────────
+    articles  = sentiment_info.get('articles', [])
+    top_news  = sentiment_info.get('top_news', '')
+    n_display = len(articles) if articles else (1 if top_news else 0)
+    if n_display:
+        with st.expander(f"📰 관련 뉴스 ({n_display}건)", expanded=False):
+            reason = sentiment_info.get('reason', '')
+            if reason:
+                st.caption(f"💬 AI 종합 평가: {reason}")
+            if articles:
+                for art in articles[:8]:
+                    url   = art.get('originallink') or art.get('link', '')
+                    title = art.get('title', '제목 없음')
+                    age   = art.get('days_ago', '')
+                    badge = f"  `{age}`" if age else ""
+                    if url:
+                        st.markdown(f"- [{title}]({url}){badge}")
+                    else:
+                        st.markdown(f"- {title}{badge}")
+            elif top_news:
+                st.markdown(f"- {top_news}")
 
 
 def _render_rec_fallback(code, action, score, reason, target_price):
@@ -410,11 +458,131 @@ def _render_rec_fallback(code, action, score, reason, target_price):
     c1.write(f"**추천 의견:** `{action}`")
     c1.write(f"**종합 점수:** {score}점")
     try:
-        c1.write(f"**목표가:** {int(target_price):,}원")
+        c1.write(f"**목표가(4주):** {int(target_price):,}원")
     except Exception:
-        c1.write(f"**목표가:** {target_price}원")
+        c1.write(f"**목표가(4주):** {target_price}원")
     c2.write(f"**분석 요약:** {reason}")
     st.caption("상세 데이터는 AI Recommendations 메뉴에서 새 추천을 생성하면 확인할 수 있습니다.")
+
+
+def _show_recommendation_heatmap(db_manager):
+    """추천 종목 지속성 히트맵을 렌더링하는 내부 함수"""
+    import pandas as pd
+    import plotly.graph_objects as go
+
+    days_options = {"7일": 7, "14일": 14, "30일": 30}
+    selected_days_label = st.radio(
+        "조회 기간", list(days_options.keys()), index=1, horizontal=True
+    )
+    days = days_options[selected_days_label]
+
+    history = db_manager.get_recommendation_history(days=days)
+    if not history:
+        st.info("히트맵을 그릴 추천 이력이 없습니다. 추천을 여러 날 실행하면 표시됩니다.")
+        return
+
+    df = pd.DataFrame(history)
+
+    # ── 피벗: 행=종목, 열=날짜, 값=score ────────────────────────
+    pivot = df.pivot_table(
+        values='score', index=['name', 'code'],
+        columns='date', aggfunc='first'
+    )
+
+    # action(BUY/HOLD/SELL) 피벗 (hover용)
+    action_pivot = df.pivot_table(
+        values='action', index=['name', 'code'],
+        columns='date', aggfunc='first'
+    )
+
+    # 날짜 오름차순 정렬
+    pivot       = pivot.sort_index(axis=1)
+    action_pivot = action_pivot.reindex(columns=pivot.columns)
+
+    # ── 연속 추천 일수 계산 ──────────────────────────────────────
+    dates_sorted = list(pivot.columns)
+
+    def _streak(row):
+        """가장 최근 날짜부터 역순으로 연속 추천 일수"""
+        count = 0
+        for d in reversed(dates_sorted):
+            if pd.notna(row.get(d)):
+                count += 1
+            else:
+                break
+        return count
+
+    streak_map = {idx: _streak(pivot.loc[idx]) for idx in pivot.index}
+
+    # ── Y축 레이블 (종목명 + 연속 일수 배지) ────────────────────
+    def _label(idx):
+        name, code = idx
+        streak = streak_map[idx]
+        badge = f"  🔥{streak}일" if streak >= 2 else ""
+        return f"{name} ({code}){badge}"
+
+    y_labels = [_label(idx) for idx in pivot.index]
+
+    # ── Hover 텍스트 행렬 ────────────────────────────────────────
+    hover = []
+    for idx in pivot.index:
+        row_hover = []
+        for d in dates_sorted:
+            score  = pivot.loc[idx, d]
+            action = action_pivot.loc[idx, d] if idx in action_pivot.index else None
+            if pd.notna(score):
+                row_hover.append(
+                    f"{idx[0]} ({idx[1]})<br>{d}<br>"
+                    f"점수: {round(score, 1)}<br>의견: {action or 'N/A'}"
+                )
+            else:
+                row_hover.append(f"{idx[0]} ({idx[1]})<br>{d}<br>미추천")
+        hover.append(row_hover)
+
+    # NaN → None (plotly heatmap용)
+    z_values = pivot.values.tolist()
+    for r in z_values:
+        for i, v in enumerate(r):
+            if pd.isna(v):
+                r[i] = None
+
+    # ── 차트 렌더링 ──────────────────────────────────────────────
+    fig = go.Figure(go.Heatmap(
+        z=z_values,
+        x=dates_sorted,
+        y=y_labels,
+        text=hover,
+        hovertemplate="%{text}<extra></extra>",
+        colorscale=[
+            [0.0,  "#2d2d2d"],   # 낮은 점수 (어두운 회색)
+            [0.4,  "#4a7c59"],   # 중간
+            [0.7,  "#5cb85c"],   # 높음
+            [1.0,  "#00e676"],   # 최고
+        ],
+        zmin=0, zmax=100,
+        colorbar=dict(title="점수", tickvals=[0, 25, 50, 75, 100]),
+        xgap=2, ygap=2,
+    ))
+    fig.update_layout(
+        title=f"종목 추천 지속성 히트맵 (최근 {days}일)",
+        xaxis=dict(title="추천일", tickangle=-30, tickfont=dict(size=11)),
+        yaxis=dict(title="", tickfont=dict(size=12), autorange="reversed"),
+        height=max(300, len(pivot) * 42 + 100),
+        margin=dict(l=20, r=20, t=50, b=40),
+        template="plotly_dark",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ── 연속 추천 상위 종목 요약 ─────────────────────────────────
+    streaks = sorted(
+        [(streak_map[idx], idx[0], idx[1]) for idx in pivot.index if streak_map[idx] >= 2],
+        reverse=True
+    )
+    if streaks:
+        st.markdown("**🔥 연속 추천 종목**")
+        cols = st.columns(min(len(streaks), 4))
+        for i, (days_cnt, name, code) in enumerate(streaks[:4]):
+            cols[i].metric(f"{name} ({code})", f"{days_cnt}일 연속")
 
 
 def _display_rec_list(recs: list, date_str: str, source_label: str):
@@ -520,6 +688,11 @@ def show_recommendations():
                 st.info("오늘 분석 결과가 없습니다. '🔄 새로 분석 실행' 버튼을 눌러 시작하세요.")
             else:
                 st.info(f"{selected_date}의 저장된 추천 데이터가 없습니다.")
+
+    # ── 추천 지속성 히트맵 ────────────────────────────────────────
+    st.markdown("---")
+    with st.expander("📅 추천 지속성 분석 (히트맵)", expanded=False):
+        _show_recommendation_heatmap(db_manager)
 
 if __name__ == "__main__":
     main()

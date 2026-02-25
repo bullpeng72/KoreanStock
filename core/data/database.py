@@ -199,6 +199,26 @@ class DatabaseManager:
             })
         return result
 
+    def get_recommendation_history(self, days: int = 30) -> List[Dict]:
+        """최근 N일간 추천 데이터 전체 반환 (지속성 히트맵용)"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT r.code,
+                       COALESCE(s.name, json_extract(r.detail_json, '$.name'), r.code) AS name,
+                       r.score, r.type, r.session_date
+                FROM recommendations r
+                LEFT JOIN stocks s ON r.code = s.code
+                WHERE r.session_date IS NOT NULL
+                  AND r.session_date >= date('now', ?)
+                ORDER BY r.session_date ASC
+            ''', (f'-{days} days',))
+            rows = cursor.fetchall()
+        return [
+            {'code': r[0], 'name': r[1], 'score': r[2], 'action': r[3], 'date': r[4]}
+            for r in rows
+        ]
+
     def get_recommendation_dates(self, limit: int = 30) -> List[str]:
         """추천 데이터가 존재하는 날짜 목록 반환 (최근순)"""
         with self.get_connection() as conn:

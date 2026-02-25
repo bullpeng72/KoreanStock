@@ -154,12 +154,10 @@ class StockDataProvider:
             logger.error(f"Error fetching market indices: {e}")
             return {}
 
-    def get_market_ranking(self, limit: int = 50) -> List[str]:
-        """거래량 및 등락률 상위 종목 코드를 취합하여 반환"""
+    def get_market_ranking(self, limit: int = 50, market: str = 'ALL') -> List[str]:
+        """거래량 및 등락률 상위 종목 코드를 취합하여 반환 (market: 'ALL'|'KOSPI'|'KOSDAQ')"""
         try:
-            # FinanceDataReader의 StockListing('KRX')은 현재 시점의 등락률과 거래량 정보를 포함하는 경우가 많음
-            # KRX Listing 결과에서 Sector/Industry 정보를 얻기 어려우므로 get_stock_list()로 보강
-            full_stock_list = self.get_stock_list() # Sector/Industry 정보가 포함된 리스트
+            full_stock_list = self.get_stock_list()
             
             # 현재 시장 랭킹 정보 (거래량, 등락률)
             df_ranking = fdr.StockListing('KRX') # 최신 거래량/등락률 정보는 KRX 리스팅에서
@@ -192,14 +190,23 @@ class StockDataProvider:
                 df_ranking['change_pct'] = pd.to_numeric(df_ranking['change_pct'], errors='coerce').fillna(0)
                 top_gainers = df_ranking.sort_values(by='change_pct', ascending=False).head(limit)
             
-            # 리스트 합치기
-            candidate_codes = list(set(top_volume['code'].tolist() + top_gainers['code'].tolist() if not top_gainers.empty else top_volume['code'].tolist()))
-            
-            # full_stock_list와 candidate_codes를 병합하여 name, market, sector, industry 정보 추가
-            final_candidates_df = full_stock_list[full_stock_list['code'].isin(candidate_codes)].copy()
-            
-            logger.info(f"Market ranking fetched: {len(final_candidates_df)} candidates found.")
-            return final_candidates_df['code'].tolist() # 최종 후보군 코드 리스트 반환
+            # 순위 순서 유지하며 합치기: 거래량 상위 → 그 외 등락률 상위
+            # (set() 사용 시 순서가 소실되어 candidate_codes[:30]이 코드번호 순으로 잘리는 버그 수정)
+            vol_codes  = top_volume['code'].tolist()
+            gain_codes = top_gainers['code'].tolist() if not top_gainers.empty else []
+            seen       = set(vol_codes)
+            ordered_codes = vol_codes + [c for c in gain_codes if c not in seen]
+
+            # 상장 종목 목록에 존재하는 코드만 유지 (비상장·관리종목 제외)
+            # market 파라미터가 지정된 경우 해당 시장 종목만 허용
+            if market != 'ALL':
+                valid_codes = set(full_stock_list[full_stock_list['market'] == market]['code'].tolist())
+            else:
+                valid_codes = set(full_stock_list['code'].tolist())
+            result = [c for c in ordered_codes if c in valid_codes]
+
+            logger.info(f"Market ranking fetched: {len(result)} candidates (volume+gainers, ordered).")
+            return result
         except Exception as e:
             logger.error(f"Error fetching market ranking: {e}")
             return []

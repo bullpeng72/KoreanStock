@@ -14,6 +14,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      - name: Restore DB cache
+        uses: actions/cache@v3
+        with:
+          path: data/storage
+          key: stock-db-${{ github.run_id }}
+          restore-keys: |
+            stock-db-
+
+      - name: Ensure DB directory exists
+        run: mkdir -p data/storage
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -33,6 +44,8 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DB_PATH: "data/storage/stock_analysis.db"
