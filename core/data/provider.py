@@ -19,6 +19,13 @@ class StockDataProvider:
         self._market_timestamp = None
         self._ohlcv_cache: Dict[str, tuple] = {}  # key: "code_period" → (timestamp, df)
 
+    @staticmethod
+    def _normalize_market_df(df: pd.DataFrame, market_name: str) -> pd.DataFrame:
+        """fdr 반환 df에서 기존 market 컬럼을 제거하고 표준 market 레이블을 추가한다."""
+        df = df.drop(columns=[c for c in df.columns if c.lower() == 'market'])
+        df['market'] = market_name
+        return df
+
     def get_stock_list(self) -> pd.DataFrame:
         """KOSPI, KOSDAQ 상장 종목 리스트를 반환 (캐싱 적용)"""
         now = datetime.now()
@@ -29,17 +36,9 @@ class StockDataProvider:
         try:
             # KRX 전체 종목 리스트를 가져오는 것이 더 안정적입니다.
             # 하지만, KRX Listing에는 Sector/Industry 정보가 불충분할 수 있으므로 KOSPI/KOSDAQ를 따로 가져와 병합
-            
-            # KOSPI 종목 리스트
-            kospi_df = fdr.StockListing('KOSPI')
-            # fdr이 'Market' 컬럼을 반환할 수 있으므로 수동 추가 전 미리 제거 (중복 방지)
-            kospi_df = kospi_df.drop(columns=[c for c in kospi_df.columns if c.lower() == 'market'])
-            kospi_df['market'] = 'KOSPI'
 
-            # KOSDAQ 종목 리스트
-            kosdaq_df = fdr.StockListing('KOSDAQ')
-            kosdaq_df = kosdaq_df.drop(columns=[c for c in kosdaq_df.columns if c.lower() == 'market'])
-            kosdaq_df['market'] = 'KOSDAQ'
+            kospi_df = self._normalize_market_df(fdr.StockListing('KOSPI'), 'KOSPI')
+            kosdaq_df = self._normalize_market_df(fdr.StockListing('KOSDAQ'), 'KOSDAQ')
 
             # 두 데이터프레임을 합치기
             df = pd.concat([kospi_df, kosdaq_df], ignore_index=True)

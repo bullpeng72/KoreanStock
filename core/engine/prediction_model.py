@@ -150,13 +150,13 @@ class StockPredictionModel:
         # ── 모멘텀 팩터 (신규) ────────────────────────
         feat['return_1m']         = df['close'].pct_change(20)
         feat['return_3m']         = df['close'].pct_change(60)
-        feat['high_52w_ratio']    = df['close'] / df['close'].rolling(252, min_periods=60).max()
+        feat['high_52w_ratio']    = df['close'] / df['close'].rolling(config.TRADING_DAYS_PER_YEAR, min_periods=60).max()
         feat['mom_accel']         = feat['return_1m'] - feat['return_3m'] / 3.0
 
         # ── 시장 상대강도 (신규) ──────────────────────
         # market_df 없으면 0(중립) 으로 채워 모델 입력 일관성 유지
         if market_df is not None and not market_df.empty:
-            aligned = market_df.reindex(feat.index, method='ffill')
+            aligned = market_df.reindex(feat.index).ffill()
             feat['rs_vs_mkt_1m'] = (feat['return_1m'] - aligned.get('return_1m', 0)).fillna(0)
             feat['rs_vs_mkt_3m'] = (feat['return_3m'] - aligned.get('return_3m', 0)).fillna(0)
         else:

@@ -5,7 +5,7 @@ load_dotenv()
 
 class Config:
     # Version
-    VERSION = "0.2.0"
+    VERSION = "0.2.1"
 
     # Project Root
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -28,5 +28,8 @@ class Config:
     # Cache Settings
     CACHE_EXPIRE_STOCKS = 1800  # 30 mins
     CACHE_EXPIRE_MARKET = 300   # 5 mins
+
+    # Market Constants
+    TRADING_DAYS_PER_YEAR = 252
 
 config = Config()

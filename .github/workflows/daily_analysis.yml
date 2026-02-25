@@ -14,13 +14,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Restore DB cache
-        uses: actions/cache@v3
-        with:
-          path: data/storage
-          key: stock-db-${{ github.run_id }}
-          restore-keys: |
-            stock-db-
+      - name: Restore DB from artifacts
+        run: gh run download --name stock-database --dir data/storage || echo "No previous DB found, starting fresh"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        continue-on-error: true
 
       - name: Ensure DB directory exists
         run: mkdir -p data/storage
@@ -50,3 +48,12 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DB_PATH: "data/storage/stock_analysis.db"
         run: python core/engine/scheduler.py
+
+      - name: Save DB as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stock-database
+          path: data/storage/stock_analysis.db
+          retention-days: 90
+          overwrite: true

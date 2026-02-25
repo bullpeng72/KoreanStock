@@ -56,7 +56,7 @@ class Backtester:
 
         win_rate = (results['strategy_returns'] > 0).sum() / (results['strategy_returns'] != 0).sum() if (results['strategy_returns'] != 0).sum() > 0 else 0
         std = results['strategy_returns'].std()
-        sharpe = (results['strategy_returns'].mean() / std) * np.sqrt(252) if std != 0 else 0
+        sharpe = (results['strategy_returns'].mean() / std) * np.sqrt(config.TRADING_DAYS_PER_YEAR) if std != 0 else 0
 
         return {
             "total_return_pct": round(total_return, 2),

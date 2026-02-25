@@ -1,6 +1,6 @@
 # 📈 Korean Stocks AI/ML Analysis System
 
-![version](https://img.shields.io/badge/version-0.2.0-blue)
+![version](https://img.shields.io/badge/version-0.2.1-blue)
 
 > **KOSPI · KOSDAQ 종목을 AI와 머신러닝으로 분석하는 자동화 투자 보조 플랫폼**
 
@@ -35,9 +35,9 @@
 | **AI 종목 추천** | 기술적 지표·ML·뉴스를 종합한 복합 점수로 유망 종목 선정 |
 | **날짜별 히스토리** | 과거 30일 분석 결과를 날짜 선택으로 조회 |
 | **추천 지속성 히트맵** | 종목별 연속 추천 일수를 히트맵으로 시각화 (연속 2일+ 시 🔥 배지) |
-| **세션 캐시** | 메뉴 이탈 후 재진입해도 분석 결과 유지 (재실행 불필요) |
-| **텔레그램 알림** | 자동화 실행 및 수동 분석 시 구조화된 리포트 즉시 발송 |
-| **전략 백테스팅** | RSI · MACD · COMPOSITE 전략의 과거 성과 시뮬레이션 |
+| **DB 우선 조회 & 세션 캐시** | '새로 분석 실행' 클릭 시 당일 저장된 DB 결과 우선 표시 (불필요한 재분석 방지), 메뉴 이탈 후 재진입해도 결과 유지 |
+| **텔레그램 알림** | 종합점수 바·당일 등락률·RSI·뉴스 헤드라인·AI 강점 포함 구조화 리포트 발송 |
+| **전략 백테스팅** | RSI · MACD · COMPOSITE 전략 시뮬레이션 (단순보유 비교, 원금선 차트, 초보자 해석 가이드 포함) |
 | **관심 종목 관리** | Watchlist 등록 및 분석 이력 타임라인 제공 |
 | **테마 필터링** | AI · 반도체 · 이차전지 · 바이오 등 테마별 종목 발굴 |
 | **뉴스 기사 링크** | 감성 분석에 활용된 뉴스 기사 원문 링크 제공 |
@@ -84,6 +84,8 @@ Korean_Stocks/
 ├── models/saved/                    # 학습된 ML 모델 및 파라미터
 ├── data/storage/                    # SQLite 데이터베이스 파일
 ├── train_models.py                  # ML 모델 재학습 스크립트
+├── tests/
+│   └── test_backtester.py           # 백테스터 단위 테스트 (pytest)
 └── .github/workflows/
     └── daily_analysis.yml           # GitHub Actions 자동화 스케줄러
 ```
@@ -111,8 +113,14 @@ KRX 전체 상장 종목
 
 2단계  ML 앙상블 예측              → ml_score (0–100)
        Random Forest + Gradient Boosting + XGBoost (RMSE 역수 가중 앙상블)
-       피처: RSI, MACD diff, 가격/SMA 비율, BB 위치·너비, 거래량 비율,
-             모멘텀 팩터, 시장 상대강도 (KOSPI→KS11, KOSDAQ→KQ11)
+       22개 피처 (train_models.py FEATURE_COLS 기준):
+         · 기본 지표 (4): RSI, MACD diff, 가격/SMA20 비율, 거래량 변화율
+         · 추세 변화 (3): 가격/SMA5 비율, RSI 변화율, MACD diff 변화율
+         · 볼린저 밴드 (3): BB 위치, BB 너비, 20일 평균 대비 거래량 비율
+         · 모멘텀 오실레이터 (3): Stochastic K, Stochastic D, CCI
+         · 변동성·거래량 (3): ATR 비율, 당일 캔들 바디 비율, OBV 변화율
+         · 모멘텀 팩터 (4): 1m·3m 수익률, 52주 고점 비율, 모멘텀 가속도
+         · 시장 상대강도 (2): KOSPI↔KS11 / KOSDAQ↔KQ11 기준 1m·3m 초과수익
        모델 없을 경우 tech_score 폴백
        예측 의미: 향후 5거래일 크로스섹셔널 순위 (0=최하위, 50=평균, 100=최상위)
 
@@ -365,6 +373,7 @@ NAVER_CLIENT_SECRET
   → 상위 30종목 심층 분석 (기술 + ML + 뉴스 + GPT)
   → 종합 점수 상위 5종목 선정
   → SQLite DB 날짜별 저장
+  → GitHub Artifact에 DB 백업 (90일 보존)
   → 텔레그램 리포트 발송
 ```
 
@@ -376,8 +385,8 @@ NAVER_CLIENT_SECRET
 |------|----------|
 | **Dashboard** | 시장 지수, 관심 종목 요약, 날짜별 AI 추천 리포트 조회 |
 | **My Watchlist** | 관심 종목 등록/삭제, 실시간 심층 분석, 분석 이력 타임라인 |
-| **AI Recommendations** | 테마·시장별 추천 생성, 날짜 선택으로 히스토리 조회, 추천 지속성 히트맵 |
-| **Backtest Viewer** | RSI/MACD/COMPOSITE 전략 수익률·MDD 시뮬레이션, 종목명 표시 |
+| **AI Recommendations** | 테마·시장별 추천 생성, 당일 DB 우선 조회 (강제 재분석 옵션 별도 제공), 날짜 선택으로 히스토리 조회, 추천 지속성 히트맵 |
+| **Backtest Viewer** | RSI/MACD/COMPOSITE 전략 시뮬레이션, 단순보유(Buy&Hold) 비교 차트, 초보자 해석 가이드 |
 | **Automation & Settings** | 수동 자동화 실행, 텔레그램 설정 상태 확인 |
 
 ---

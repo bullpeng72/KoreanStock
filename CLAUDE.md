@@ -1,4 +1,4 @@
-# Korean Stocks AI/ML Analysis System `v0.2.0`
+# Korean Stocks AI/ML Analysis System `v0.2.1`
 
 KOSPI·KOSDAQ 종목을 기술적 지표, 머신러닝, 뉴스 감성 분석으로 자동 스크리닝하고 텔레그램 리포트를 발송하는 투자 보조 플랫폼.
 
@@ -7,7 +7,7 @@ KOSPI·KOSDAQ 종목을 기술적 지표, 머신러닝, 뉴스 감성 분석으�
 1. **Decoupling:** 비즈니스 로직(`core/`)과 UI(`main.py`)를 엄격히 분리. UI 없이도 분석 엔진이 독립 동작해야 함.
 2. **Validation First:** 모든 전략과 ML 모델은 백테스팅 결과를 동반해야 함.
 3. **Cost Control:** LLM(GPT-4o-mini) 호출 전 전처리로 비용 최적화. `max_tokens` 제한 필수.
-4. **Automation:** 데이터 수집·분석·알림은 GitHub Actions 스케줄러가 담당 (평일 16:30 KST).
+4. **Automation:** 데이터 수집·분석·알림은 GitHub Actions 스케줄러가 담당 (평일 16:30 KST). SQLite DB는 GitHub Artifact로 자동 백업 (90일 보존).
 
 ## 기술 스택
 
@@ -15,7 +15,7 @@ KOSPI·KOSDAQ 종목을 기술적 지표, 머신러닝, 뉴스 감성 분석으�
 - **AI/LLM:** OpenAI GPT-4o-mini
 - **ML:** Scikit-learn (Random Forest, Gradient Boosting), XGBoost
 - **기술 지표:** `ta` 라이브러리 (RSI, MACD, Bollinger Bands, SMA, OBV)
-- **데이터:** FinanceDataReader, yfinance, Naver News API
+- **데이터:** FinanceDataReader, Naver News API
 - **DB:** SQLite (`data/storage/stock_analysis.db`)
 - **자동화:** GitHub Actions, Telegram Bot API
 - **시각화:** Plotly, Matplotlib
@@ -44,6 +44,8 @@ core/
 models/saved/                    # 학습된 ML 모델 (.pkl) 및 파라미터 (.json)
 data/storage/                    # SQLite DB 파일
 train_models.py                  # ML 모델 재학습 스크립트
+tests/
+└── test_backtester.py           # 백테스터 단위 테스트 (pytest)
 ```
 
 ## 분석 파이프라인
@@ -67,6 +69,9 @@ streamlit run main.py
 
 # ML 모델 재학습
 python train_models.py
+
+# 단위 테스트 실행
+pytest tests/
 
 # 의존성 설치
 pip install -r requirements.txt

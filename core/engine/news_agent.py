@@ -131,6 +131,7 @@ class NewsAgent:
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.1,   # 일관된 감성 점수 산출
+                max_tokens=200,
             )
             return json.loads(response.choices[0].message.content)
         except Exception as e:

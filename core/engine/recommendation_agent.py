@@ -93,6 +93,10 @@ class RecommendationAgent:
         final_recs = results[:limit]
         self._save_to_db(final_recs)
 
+        # 6. composite_score를 rec dict에 추가 (알림 표시용)
+        for rec in final_recs:
+            rec['composite_score'] = round(_composite_score(rec), 2)
+
         return final_recs
 
     def _analyze_candidate(self, code: str, name: str) -> Optional[Dict[str, Any]]:
@@ -113,7 +117,8 @@ class RecommendationAgent:
                 composite = round(_composite_score(rec), 2)
                 try:
                     detail_json = json.dumps(rec, ensure_ascii=False, default=str)
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"JSON serialization failed for {rec.get('code', '?')}: {e}")
                     detail_json = None
 
                 # 동일 날짜 + 동일 종목 기존 데이터 삭제 후 재삽입 (UPSERT)
