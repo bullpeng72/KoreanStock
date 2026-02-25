@@ -261,8 +261,8 @@ AI 추천 + 아래 조건 중 2개 이상 충족 시 매수 검토 ✅
 
 ### 1. 저장소 클론
 ```bash
-git clone https://github.com/YourGitHubUsername/Korean_Stocks.git
-cd Korean_Stocks
+git clone https://github.com/bullpeng72/KoreanStock.git
+cd KoreanStock
 ```
 
 ### 2. Python 환경 설정 (Python 3.11 권장)
