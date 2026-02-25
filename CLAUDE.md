@@ -4,7 +4,7 @@ KOSPI·KOSDAQ 종목을 기술적 지표, 머신러닝, 뉴스 감성 분석으�
 
 ## 아키텍처 원칙
 
-1. **Decoupling:** 비즈니스 로직(`core/`)과 UI(`app/`, `main.py`)를 엄격히 분리. UI 없이도 분석 엔진이 독립 동작해야 함.
+1. **Decoupling:** 비즈니스 로직(`core/`)과 UI(`main.py`)를 엄격히 분리. UI 없이도 분석 엔진이 독립 동작해야 함.
 2. **Validation First:** 모든 전략과 ML 모델은 백테스팅 결과를 동반해야 함.
 3. **Cost Control:** LLM(GPT-4o-mini) 호출 전 전처리로 비용 최적화. `max_tokens` 제한 필수.
 4. **Automation:** 데이터 수집·분석·알림은 GitHub Actions 스케줄러가 담당 (평일 16:30 KST).
@@ -26,7 +26,7 @@ KOSPI·KOSDAQ 종목을 기술적 지표, 머신러닝, 뉴스 감성 분석으�
 ```
 main.py                          # Streamlit 진입점
 core/
-├── config.py                    # 환경변수 및 설정 (dotenv)
+├── config.py                    # 환경변수 및 설정 (dotenv), VERSION 상수
 ├── data/
 │   ├── provider.py              # 주가·뉴스 데이터 수집
 │   └── database.py              # SQLite CRUD
@@ -43,7 +43,6 @@ core/
     └── notifier.py              # 텔레그램 리포트 발송
 models/saved/                    # 학습된 ML 모델 (.pkl) 및 파라미터 (.json)
 data/storage/                    # SQLite DB 파일
-app/pages/                       # Streamlit 멀티페이지 컴포넌트
 train_models.py                  # ML 모델 재학습 스크립트
 ```
 
@@ -55,7 +54,9 @@ train_models.py                  # ML 모델 재학습 스크립트
 3단계  뉴스 감성   → sentiment_score (-100~100)
 4단계  GPT 종합    → action (BUY/HOLD/SELL), 요약, 목표가
 
-종합 점수 = tech×0.3 + ml×0.4 + normalized_sentiment×0.3
+종합 점수 (ML 모델 활성 시) = tech×0.40 + ml×0.35 + sentiment_norm×0.25
+종합 점수 (ML 모델 없을 시) = tech×0.65 + sentiment_norm×0.35
+  ※ sentiment_norm = (sentiment_score + 100) / 2  → 0~100 정규화
 ```
 
 ## 주요 명령어
@@ -97,7 +98,7 @@ DB_PATH=data/storage/stock_analysis.db
 
 ### 아키텍처 경계
 - `core/` 파일에 `import streamlit` 또는 `st.` 호출이 있으면 🔴 High (UI/Core 커플링 위반)
-- `core/` 파일이 `app/` 또는 `main.py`를 직접 import하면 🔴 High
+- `core/` 파일이 `main.py`를 직접 import하면 🔴 High
 
 ### ML 모델 무결성
 - 모델 파일(`.pkl`) 로드 시 대응 스케일러를 함께 로드하지 않으면 🔴 High
@@ -109,6 +110,6 @@ DB_PATH=data/storage/stock_analysis.db
 - 종목 루프 안에서 GPT를 개별 호출하면 🟡 Medium (배치 처리 검토)
 
 ### 자동 수정 금지 대상 (Manual Only)
-- 종합 점수 가중치 (`tech×0.3 + ml×0.4 + sentiment×0.3`) 변경
+- 종합 점수 가중치 (`tech×0.40 + ml×0.35 + sentiment_norm×0.25`) 변경
 - ML 피처 목록 변경 (모델 재학습 필요)
 - GitHub Actions 스케줄 변경
