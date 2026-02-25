@@ -448,6 +448,34 @@ RSI와 MACD **두 지표가 동시에 매수 신호를 보낼 때만** 진입합
             )
             st.dataframe(res['daily_results'].tail(10))
 
+# ── 테마 분류 상수 & 헬퍼 ──────────────────────────────────────────────────
+_THEME_KEYWORDS_MAP = {
+    "AI/인공지능": ["AI", "인공지능", "소프트웨어", "데이터"],
+    "로봇/자동화": ["로봇", "자동화", "기계", "장비"],
+    "반도체":      ["반도체", "장비", "소재", "부품"],
+    "이차전지":    ["배터리", "이차전지", "에너지", "화학"],
+    "제약/바이오": ["제약", "바이오", "의료", "생명"],
+}
+
+def _get_rec_themes(rec: dict) -> list:
+    """sector/industry/name 키워드 매칭으로 테마 분류 반환."""
+    text = " ".join([
+        rec.get('name', ''),
+        rec.get('sector', ''),
+        rec.get('industry', ''),
+    ])
+    matched = [label for label, kws in _THEME_KEYWORDS_MAP.items()
+               if any(kw in text for kw in kws)]
+    return matched if matched else ["기타"]
+
+
+def _market_badge(market: str) -> str:
+    """KOSPI/KOSDAQ 배지 HTML 반환."""
+    color = "#1f6adb" if market == "KOSPI" else "#8b44db" if market == "KOSDAQ" else "#555"
+    label = market if market in ("KOSPI", "KOSDAQ") else "─"
+    return f"<span style='background:{color};color:white;padding:1px 7px;border-radius:4px;font-size:0.8em;font-weight:bold'>{label}</span>"
+
+
 def show_dashboard():
     st.title("📊 Market Dashboard")
     
@@ -512,7 +540,23 @@ def show_dashboard():
                 f"<br><span style='color:#aaa'>{freshness} · {len(recs)}종목</span>",
                 unsafe_allow_html=True
             )
-            for r in recs:
+
+            # 테마 필터 — rec['theme']에 저장된 분석 설정 기준으로 분류
+            _stored_themes = sorted({r.get('theme', '전체') for r in recs})
+            _show_dash_filter = len(_stored_themes) > 1 or (_stored_themes and _stored_themes[0] != '전체')
+            _dash_theme = '전체'
+            if _show_dash_filter:
+                _dash_choices = ['전체'] + [t for t in _stored_themes if t != '전체']
+                _dash_theme = st.radio(
+                    "테마 필터", _dash_choices, horizontal=True, key="dash_theme_filter"
+                )
+
+            filtered_recs = recs if _dash_theme == '전체' else [
+                r for r in recs if r.get('theme', '전체') == _dash_theme
+            ]
+            if not filtered_recs:
+                st.info(f"'{_dash_theme}' 테마에 해당하는 종목이 없습니다.")
+            for r in filtered_recs:
                 action = r.get('ai_opinion', {}).get('action', 'HOLD')
                 icon = {'BUY': '🟢', 'SELL': '🔴'}.get(action, '🟡')
                 score = round(
@@ -520,8 +564,12 @@ def show_dashboard():
                     + r.get('ml_score', 0) * 0.4
                     + (r.get('sentiment_score', 0) + 100) / 2 * 0.3, 1
                 )
+                market = r.get('market', '')
+                theme_tag = r.get('theme', '')
                 label = (
-                    f"{icon} {r.get('name', r.get('code',''))} ({r.get('code','')})  |  "
+                    f"{icon} {r.get('name', r.get('code',''))} ({r.get('code','')}) "
+                    f"{'[' + market + ']' if market else ''}"
+                    f"{'  [' + theme_tag + ']' if theme_tag and theme_tag != '전체' else ''}  |  "
                     f"종합점수: {score}  |  목표가(4주): {int(r.get('ai_opinion',{}).get('target_price',0)):,}원"
                 )
                 with st.expander(label):
@@ -539,6 +587,15 @@ def render_recommendation_card(rec: dict, key_prefix: str = "rec"):
     # 헤더 행: 현재가 / 점수 요약 / AI 의견 배지
     top_left, top_mid, top_right = st.columns([2, 3, 1])
     with top_left:
+        market = rec.get('market', '')
+        theme = rec.get('theme', '')
+        meta_parts = []
+        if market:
+            meta_parts.append(_market_badge(market))
+        if theme and theme != '전체':
+            meta_parts.append(f"<span style='color:#aaa;font-size:0.82em'>{theme}</span>")
+        if meta_parts:
+            st.markdown(" &nbsp;".join(meta_parts), unsafe_allow_html=True)
         st.metric(
             "현재가",
             f"{int(rec.get('current_price', 0)):,}원",
@@ -775,11 +832,34 @@ def _show_recommendation_heatmap(db_manager):
 def _display_rec_list(recs: list, date_str: str, source_label: str):
     """추천 종목 리스트를 카드로 렌더링하는 내부 헬퍼"""
     st.caption(f"📅 {date_str}  |  {source_label}  |  {len(recs)}종목")
-    for i, rec in enumerate(recs):
+
+    # 테마 필터 — rec['theme']에 저장된 분석 설정 기준으로 분류
+    _stored_themes = sorted({r.get('theme', '전체') for r in recs})
+    _show_filter = len(_stored_themes) > 1 or (_stored_themes and _stored_themes[0] != '전체')
+    _sel_theme = '전체'
+    if _show_filter:
+        _theme_choices = ['전체'] + [t for t in _stored_themes if t != '전체']
+        _sel_theme = st.radio(
+            "테마 필터", _theme_choices, horizontal=True,
+            key=f"rec_theme_filter_{date_str}_{source_label}"
+        )
+
+    filtered = recs if _sel_theme == '전체' else [
+        r for r in recs if r.get('theme', '전체') == _sel_theme
+    ]
+    if not filtered:
+        st.info(f"'{_sel_theme}' 테마에 해당하는 종목이 없습니다.")
+        return
+
+    for i, rec in enumerate(filtered):
         action = rec.get('ai_opinion', {}).get('action', 'HOLD')
         icon = {'BUY': '🟢', 'SELL': '🔴'}.get(action, '🟡')
+        market = rec.get('market', '')
+        theme_tag = rec.get('theme', '')
         label = (
-            f"{icon} {rec.get('name', rec.get('code', ''))} ({rec.get('code', '')})  |  "
+            f"{icon} {rec.get('name', rec.get('code', ''))} ({rec.get('code', '')}) "
+            f"{'[' + market + ']' if market else ''}"
+            f"{'  [' + theme_tag + ']' if theme_tag and theme_tag != '전체' else ''}  |  "
             f"Tech: {rec.get('tech_score', '-')} · ML: {rec.get('ml_score', '-')} · News: {rec.get('sentiment_score', '-')}"
         )
         with st.expander(label, expanded=(i == 0)):
@@ -846,7 +926,7 @@ def show_recommendations():
         st.session_state['force_reanalyze'] = False
         with st.spinner(f"[{theme_option}] 강제 재분석 중... 잠시만 기다려주세요."):
             recs = recommendation_agent.get_recommendations(
-                limit=5, market=selected_market, theme_keywords=selected_themes
+                limit=5, market=selected_market, theme_keywords=selected_themes, theme_label=theme_option
             )
         if recs:
             st.session_state['rec_results'] = recs
@@ -866,16 +946,16 @@ def show_recommendations():
             st.session_state['rec_session_date'] = today_str
             st.info(f"💾 오늘({today_str}) 저장된 분석 결과를 불러왔습니다.")
             _display_rec_list(existing_today, today_str, "오늘 저장된 데이터")
-            with st.expander("🔁 강제 재분석 (기존 결과 덮어쓰기)", expanded=False):
+            with st.expander("🔁 강제 재분석 (기존 결과 덮어쓰기)", expanded=True):
                 st.warning("⚠️ 재분석 시 AI 비결정성으로 추천 종목이 달라질 수 있습니다.")
-                if st.button("지금 재분석 실행", type="primary"):
+                def _trigger_force_reanalyze():
                     st.session_state['force_reanalyze'] = True
-                    st.rerun()
+                st.button("지금 재분석 실행", type="primary", on_click=_trigger_force_reanalyze)
         else:
             # 오늘 DB 결과 없음 → 새로 분석
             with st.spinner(f"[{theme_option}] 테마 분석 중... 잠시만 기다려주세요."):
                 recs = recommendation_agent.get_recommendations(
-                    limit=5, market=selected_market, theme_keywords=selected_themes
+                    limit=5, market=selected_market, theme_keywords=selected_themes, theme_label=theme_option
                 )
             if recs:
                 st.session_state['rec_results'] = recs

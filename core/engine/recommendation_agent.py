@@ -36,9 +36,9 @@ def _composite_score(x: Dict[str, Any]) -> float:
 class RecommendationAgent:
     """분석된 데이터를 바탕으로 투자 종목을 추천하는 에이전트"""
 
-    def get_recommendations(self, limit: int = 5, market: str = 'ALL', theme_keywords: List[str] = None) -> List[Dict[str, Any]]:
+    def get_recommendations(self, limit: int = 5, market: str = 'ALL', theme_keywords: List[str] = None, theme_label: str = '전체') -> List[Dict[str, Any]]:
         """유망 종목 추천 리스트 생성 (테마 및 시장 필터 적용)"""
-        logger.info(f"Generating recommendations (Market: {market}, Theme: {theme_keywords})...")
+        logger.info(f"Generating recommendations (Market: {market}, Theme: {theme_label})...")
 
         # 1. 후보군 코드 선정
         if theme_keywords:
@@ -89,8 +89,11 @@ class RecommendationAgent:
         # 4. composite 점수로 정렬
         results.sort(key=_composite_score, reverse=True)
 
-        # 5. DB에 추천 결과 저장
+        # 5. DB에 추천 결과 저장 (theme_label / market 메타 포함)
         final_recs = results[:limit]
+        for rec in final_recs:
+            rec['theme'] = theme_label
+            rec['analysis_market'] = market
         self._save_to_db(final_recs)
 
         # 6. composite_score를 rec dict에 추가 (알림 표시용)

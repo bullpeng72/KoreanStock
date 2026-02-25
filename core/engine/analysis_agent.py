@@ -55,9 +55,20 @@ class AnalysisAgent:
         
         # 6. 결과 정리
         latest = df_with_indicators.iloc[-1]
+
+        # 시장 구분·섹터 정보 (stock_list 캐시에서 조회)
+        stock_list = data_provider.get_stock_list()
+        _row = stock_list[stock_list['code'] == code]
+        market_val   = str(_row.iloc[0]['market'])   if not _row.empty else ''
+        sector_val   = str(_row.iloc[0].get('sector',   '') or '') if not _row.empty else ''
+        industry_val = str(_row.iloc[0].get('industry', '') or '') if not _row.empty else ''
+
         analysis_res = {
             "code": code,
             "name": name,
+            "market": market_val,
+            "sector": sector_val,
+            "industry": industry_val,
             "current_price": float(latest['close']),
             "change_pct": float(latest['change']) * 100 if 'change' in latest else 0.0,
             "tech_score": tech_score,
