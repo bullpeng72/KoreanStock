@@ -36,6 +36,7 @@
 | **날짜별 히스토리** | 과거 30일 분석 결과를 날짜 선택으로 조회 |
 | **추천 지속성 히트맵** | 종목별 연속 추천 일수를 히트맵으로 시각화 (연속 2일+ 시 🔥 배지) |
 | **DB 우선 조회 & 세션 캐시** | '새로 분석 실행' 클릭 시 당일 저장된 DB 결과 우선 표시 (불필요한 재분석 방지), 메뉴 이탈 후 재진입해도 결과 유지 |
+| **DB 자동 동기화** | GitHub Actions 완료 후 분석 DB를 자동으로 저장소에 커밋·푸시 → 로컬에서 `git pull` 한 번으로 최신 추천 결과 반영 |
 | **텔레그램 알림** | 종합점수 바·당일 등락률·RSI·뉴스 헤드라인·AI 강점 포함 구조화 리포트 발송 |
 | **전략 백테스팅** | RSI · MACD · COMPOSITE 전략 시뮬레이션 (단순보유 비교, 원금선 차트, 초보자 해석 가이드 포함) |
 | **관심 종목 관리** | Watchlist 등록 및 분석 이력 타임라인 제공 |
@@ -51,7 +52,7 @@ UI          Streamlit
 AI/LLM      OpenAI GPT-4o-mini
 ML          Scikit-learn (Random Forest, Gradient Boosting), XGBoost
 기술 지표    ta (RSI, MACD, Bollinger Bands, SMA, OBV)
-데이터       FinanceDataReader, Naver News API
+데이터       FinanceDataReader, PyKrx (펀더멘털·수급), Naver News API
 DB          SQLite
 자동화       GitHub Actions (평일 16:30 KST), Telegram Bot API
 시각화       Plotly, Matplotlib
@@ -376,6 +377,7 @@ NAVER_CLIENT_SECRET
   → 종합 점수 상위 5종목 선정
   → SQLite DB 날짜별 저장
   → GitHub Artifact에 DB 백업 (90일 보존)
+  → DB를 저장소에 자동 커밋·푸시 → 로컬 git pull로 즉시 반영
   → 텔레그램 리포트 발송
 ```
 
