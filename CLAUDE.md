@@ -1,4 +1,4 @@
-# Korean Stocks AI/ML Analysis System `v0.2.1`
+# Korean Stocks AI/ML Analysis System `v0.2.2`
 
 KOSPI·KOSDAQ 종목을 기술적 지표, 머신러닝, 뉴스 감성 분석으로 자동 스크리닝하고 텔레그램 리포트를 발송하는 투자 보조 플랫폼.
 

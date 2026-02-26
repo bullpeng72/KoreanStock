@@ -9,11 +9,11 @@
     "reg_alpha": 0.1,
     "reg_lambda": 1.0
   },
-  "training_samples": 12360,
-  "test_rmse": 29.7388,
-  "test_r2": -0.062,
-  "training_duration": 0.2,
-  "performance_improvement": -3.05,
-  "saved_at": "2026-02-25T09:46:59.148607",
-  "model_version": "xgboost_v20260225_094659"
+  "training_samples": 44445,
+  "test_rmse": 28.823,
+  "test_r2": 0.003,
+  "training_duration": 0.3,
+  "performance_improvement": 0.15,
+  "saved_at": "2026-02-26T16:04:52.229963",
+  "model_version": "xgboost_v20260226_160452"
 }

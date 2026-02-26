@@ -5,7 +5,7 @@ load_dotenv()
 
 class Config:
     # Version
-    VERSION = "0.2.1"
+    VERSION = "0.2.2"
 
     # Project Root
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

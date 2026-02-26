@@ -5,7 +5,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 import joblib
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 import os
 import json
@@ -15,6 +15,10 @@ from core.engine.indicators import indicators
 from core.data.database import db_manager
 
 logger = logging.getLogger(__name__)
+
+# train_models.py의 BASE_FEATURE_COLS 개수 — 이전(22피처) vs 신규(31피처) 모델 구분용
+_BASE_FEATURE_COUNT = 22
+
 
 class StockPredictionModel:
     """머신러닝 기반 주가 예측 모델 클래스 (앙상블)"""
@@ -28,6 +32,8 @@ class StockPredictionModel:
         self.params_dir = os.path.join(config.BASE_DIR, "models", "saved", "model_params")
         # 시장 지수 당일 캐시 (KS11/KQ11 별도 캐싱, 상대강도 피처용)
         self._market_cache: Dict[str, Any] = {}  # symbol → {'df': DataFrame, 'date': str}
+        # PyKrx 당일 캐시 (종목별 펀더멘털/투자자 피처)
+        self._pykrx_cache: Dict[str, Any] = {}   # code → {'data': dict, 'date': str}
         self._load_existing_models()
 
     def _load_existing_models(self):
@@ -166,6 +172,79 @@ class StockPredictionModel:
         # inf(거래량 0, 분모 0 등) → NaN 치환 후 제거
         return feat.replace([np.inf, -np.inf], np.nan).dropna()
 
+    def _get_pykrx_features(self, code: str, df: pd.DataFrame) -> Dict[str, float]:
+        """PyKrx에서 해당 종목의 최근 펀더멘털/투자자 피처를 반환 (당일 캐싱).
+
+        크로스섹셔널 순위(XS) 피처는 단일 종목 추론이므로 중립값(50.0) 사용.
+        """
+        from datetime import date as _date
+        today = _date.today().isoformat()
+        cached = self._pykrx_cache.get(code, {})
+        if cached.get('date') == today and 'data' in cached:
+            return cached['data']
+
+        neutral: Dict[str, float] = {
+            'pbr': 1.0, 'per': 15.0, 'div': 1.0,
+            'pbr_xs': 50.0, 'per_xs': 50.0,
+            'foreign_5d_ratio': 0.0, 'inst_5d_ratio': 0.0,
+            'foreign_xs': 50.0, 'inst_xs': 50.0,
+        }
+
+        try:
+            from pykrx import stock as pykrx_stock
+        except ImportError:
+            return neutral
+
+        try:
+            end_dt   = datetime.now()
+            start_dt = end_dt - timedelta(days=60)
+            start_str = start_dt.strftime('%Y%m%d')
+            end_str   = end_dt.strftime('%Y%m%d')
+
+            result = dict(neutral)
+
+            # 펀더멘털 (PBR, PER, DIV)
+            try:
+                fund_df = pykrx_stock.get_market_fundamental_by_date(start_str, end_str, code)
+                fund_df.index = pd.to_datetime(fund_df.index)
+                if not fund_df.empty:
+                    last = fund_df.iloc[-1]
+                    result['pbr'] = float(last.get('PBR', neutral['pbr']))
+                    result['per'] = float(last.get('PER', neutral['per']))
+                    result['div'] = float(last.get('DIV', neutral['div']))
+            except Exception as e:
+                logger.debug(f"[PyKrx] {code} fundamental 실패: {e}")
+
+            # 외국인/기관 5일 누적 순매수 비율
+            try:
+                trade_df = pykrx_stock.get_market_trading_value_by_date(start_str, end_str, code)
+                trade_df.index = pd.to_datetime(trade_df.index)
+                if not trade_df.empty and not df.empty:
+                    close_vol   = df['close'].reindex(trade_df.index, method='ffill') * \
+                                  df['volume'].reindex(trade_df.index, method='ffill')
+                    turnover_5d = close_vol.rolling(5, min_periods=1).sum().replace(0, np.nan)
+
+                    if '외국인합계' in trade_df.columns:
+                        foreign_5d = trade_df['외국인합계'].rolling(5, min_periods=1).sum()
+                        ratio = (foreign_5d / turnover_5d).clip(-0.5, 0.5).fillna(0)
+                        if not ratio.empty:
+                            result['foreign_5d_ratio'] = float(ratio.iloc[-1])
+
+                    if '기관합계' in trade_df.columns:
+                        inst_5d = trade_df['기관합계'].rolling(5, min_periods=1).sum()
+                        ratio   = (inst_5d / turnover_5d).clip(-0.5, 0.5).fillna(0)
+                        if not ratio.empty:
+                            result['inst_5d_ratio'] = float(ratio.iloc[-1])
+            except Exception as e:
+                logger.debug(f"[PyKrx] {code} trading 실패: {e}")
+
+            self._pykrx_cache[code] = {'data': result, 'date': today}
+            return result
+
+        except Exception as e:
+            logger.debug(f"[PyKrx] {code} 피처 수집 실패: {e}")
+            return neutral
+
     def predict(self, code: str, df: pd.DataFrame,
                 df_with_indicators: pd.DataFrame = None,
                 fallback_score: float = None) -> Dict[str, Any]:
@@ -194,7 +273,22 @@ class StockPredictionModel:
         if features.empty:
             return {"error": "Insufficient data for ML prediction"}
 
-        latest_x = features.iloc[-1:].values
+        latest_x = features.iloc[-1:].values  # shape (1, 22) — 기술적 지표 피처
+
+        # PyKrx 피처 9개 추가 (31-피처 신규 모델용)
+        pykrx_feat   = self._get_pykrx_features(code, df)
+        pykrx_values = np.array([[
+            pykrx_feat.get('pbr',              1.0),
+            pykrx_feat.get('per',             15.0),
+            pykrx_feat.get('div',              1.0),
+            pykrx_feat.get('pbr_xs',          50.0),
+            pykrx_feat.get('per_xs',          50.0),
+            pykrx_feat.get('foreign_5d_ratio', 0.0),
+            pykrx_feat.get('inst_5d_ratio',    0.0),
+            pykrx_feat.get('foreign_xs',      50.0),
+            pykrx_feat.get('inst_xs',         50.0),
+        ]])
+        latest_x_full = np.hstack([latest_x, pykrx_values])  # shape (1, 31)
 
         # RMSE 기반 가중 앙상블: w_i = 1/RMSE_i
         weighted_sum = 0.0
@@ -202,9 +296,12 @@ class StockPredictionModel:
         model_count  = 0
         for name, model in self.models.items():
             try:
-                x = latest_x.copy()
-                if name in self.scalers:
-                    x = self.scalers[name].transform(x)
+                scaler = self.scalers.get(name)
+                # 모델이 31-피처(신규)인지 22-피처(구버전)인지 scaler 크기로 구분
+                n_expected = scaler.n_features_in_ if scaler is not None else _BASE_FEATURE_COUNT
+                x = latest_x_full.copy() if n_expected > _BASE_FEATURE_COUNT else latest_x.copy()
+                if scaler is not None:
+                    x = scaler.transform(x)
                 p = float(model.predict(x)[0])
                 w = self.model_weights.get(name, 1.0)
                 weighted_sum += p * w

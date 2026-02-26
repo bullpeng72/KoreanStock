@@ -1,6 +1,6 @@
 # 📈 Korean Stocks AI/ML Analysis System
 
-![version](https://img.shields.io/badge/version-0.2.1-blue)
+![version](https://img.shields.io/badge/version-0.2.2-blue)
 
 > **KOSPI · KOSDAQ 종목을 AI와 머신러닝으로 분석하는 자동화 투자 보조 플랫폼**
 
@@ -113,7 +113,7 @@ KRX 전체 상장 종목
 
 2단계  ML 앙상블 예측              → ml_score (0–100)
        Random Forest + Gradient Boosting + XGBoost (RMSE 역수 가중 앙상블)
-       22개 피처 (train_models.py FEATURE_COLS 기준):
+       31개 피처 (BASE 22 + PyKrx 9, train_models.py FEATURE_COLS 기준):
          · 기본 지표 (4): RSI, MACD diff, 가격/SMA20 비율, 거래량 변화율
          · 추세 변화 (3): 가격/SMA5 비율, RSI 변화율, MACD diff 변화율
          · 볼린저 밴드 (3): BB 위치, BB 너비, 20일 평균 대비 거래량 비율
@@ -121,6 +121,8 @@ KRX 전체 상장 종목
          · 변동성·거래량 (3): ATR 비율, 당일 캔들 바디 비율, OBV 변화율
          · 모멘텀 팩터 (4): 1m·3m 수익률, 52주 고점 비율, 모멘텀 가속도
          · 시장 상대강도 (2): KOSPI↔KS11 / KOSDAQ↔KQ11 기준 1m·3m 초과수익
+         · 펀더멘털 (5): PBR, PER, DIV, PBR 크로스섹셔널 순위, PER 크로스섹셔널 순위
+         · 수급 (4): 외국인/기관 5일 누적 순매수 비율, 외국인/기관 크로스섹셔널 순위
        모델 없을 경우 tech_score 폴백
        예측 의미: 향후 5거래일 크로스섹셔널 순위 (0=최하위, 50=평균, 100=최상위)
 
