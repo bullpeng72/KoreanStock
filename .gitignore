@@ -26,7 +26,7 @@ wheels/
 
 # Database
 *.db
-!data/storage/stock_analysis.db  # 필요하다면 제외 가능하지만 보통은 무시
+!data/storage/stock_analysis.db
 
 # OS
 .DS_Store
