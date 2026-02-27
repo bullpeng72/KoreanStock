@@ -103,14 +103,56 @@ class NewsAgent:
                         "days_ago":     self._days_ago_label(pub_date),
                         "days_ago_int": days_int,
                     })
+                # 계열사 혼입 제거 → 중복 제거 순으로 적용
+                result = self._filter_by_stock_name(result, stock_name)
                 before = len(result)
                 result = self._deduplicate_news(result)
-                logger.debug(f"[{stock_name}] 뉴스 중복 제거: {before}건 → {len(result)}건")
+                logger.debug(f"[{stock_name}] 뉴스 전처리: 계열사 필터 후 {before}건, 중복 제거 후 {len(result)}건")
                 return result
         except Exception as e:
             logger.error(f"News fetching error: {e}")
 
         return []
+
+    @staticmethod
+    def _filter_by_stock_name(items: List[Dict], stock_name: str) -> List[Dict]:
+        """계열사 혼입 기사 제거 — 종목명이 단독으로 언급된 기사만 유지.
+
+        판단 기준: 제목에서 종목명 다음에 오는 문자가
+          (A) 한글 조사(가/는/를/의/에서 등)이고, 그 뒤가 한글이 아닌 경우  →  단독 언급
+          (B) 공백·숫자·영문·문장부호 등 비한글 문자인 경우               →  단독 언급
+          (C) 조사 없이 한글이 바로 이어지는 경우                          →  계열사 복합어 → 제거
+
+        예)
+          '카카오가 주가 상승'  →  '가' + 공백  →  유지 ✓
+          '카카오 주가'        →  공백(비한글)  →  유지 ✓
+          '카카오뱅크 실적'    →  '뱅' 바로 이어짐 → 제거 ✗
+          '삼성전자서비스 공시' →  '서'(조사처럼 보이나) 뒤 '비'(한글) → 제거 ✗
+
+        필터 후 5건 미만이면 원본 반환 (소형주 혹은 짧은 종목명 방어 fallback).
+        """
+        # 한국어 조사 목록: 긴 형태를 먼저 나열 (greedy 방지)
+        particles = (
+            '이고|이며|이나|이라|에서|로서|로부터|까지|처럼|보다|부터|마다|'
+            '조차|마저|뿐|씩|이든지|이라도|이든|이|가|은|는|을|를|의|에|로|과|와|도|만|며|고|서'
+        )
+        # 종목명 뒤: (조사 + 비한글) 또는 (비한글 바로)
+        standalone = re.compile(
+            re.escape(stock_name)
+            + r'(?:(?:' + particles + r')(?![가-힣])|(?![가-힣]))'
+        )
+        filtered = [item for item in items if standalone.search(item['title'])]
+
+        removed = len(items) - len(filtered)
+        if filtered and removed:
+            logger.debug(f"[계열사 필터] {stock_name}: {removed}건 제거 ({len(filtered)}건 유지)")
+
+        # 결과가 너무 적으면 원본 유지 (소형주·짧은 종목명 방어)
+        # 3건 미만일 때만 fallback — 3건 이상이면 관련성 높은 기사만 활용하는 것이 품질상 유리
+        if len(filtered) < 3:
+            logger.debug(f"[계열사 필터] {stock_name}: 필터 후 {len(filtered)}건 미만 → fallback")
+            return items
+        return filtered
 
     @staticmethod
     def _deduplicate_news(items: List[Dict]) -> List[Dict]:
