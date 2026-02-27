@@ -37,7 +37,11 @@ def get_analysis(code: str, db=Depends(get_db)):
 @router.get("/analysis/{code}/history")
 def get_analysis_history(code: str, limit: int = 5, db=Depends(get_db)):
     """종목 분석 이력 (최근 N건)"""
-    return db.get_analysis_history(code, limit=limit)
+    try:
+        return db.get_analysis_history(code, limit=limit)
+    except Exception as e:
+        logger.error(f"[{code}] 분석 이력 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/analysis/{code}", status_code=202)

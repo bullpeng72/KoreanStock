@@ -6,6 +6,11 @@
 async function api(url, opts = {}) {
   const res = await fetch(url, opts);
   if (res.status === 204) return null;
+  const ct = res.headers.get("content-type") || "";
+  if (!ct.includes("json")) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`서버 오류 (HTTP ${res.status})${text ? ": " + text.slice(0, 120) : ""}`);
+  }
   const data = await res.json();
   if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
   return data;
