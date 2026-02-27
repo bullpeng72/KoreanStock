@@ -229,13 +229,18 @@ async function buildSlides() {
   const overlay = document.getElementById("loading-overlay");
   if (overlay) overlay.style.display = "none";
 
-  // Reveal.js: destroy 후 재초기화 (슬라이드 동적 삽입 후 확실히 인식하도록)
+  // ── 진단: DOM 섹션 수 확인 ──────────────────────────────────────
+  const domSections = container.querySelectorAll("section").length;
+  console.log(`[KS] DOM sections: ${domSections}`);
+
+  // ── Reveal.js 초기화 ─────────────────────────────────────────────
   try { Reveal.destroy(); } catch(e) { /* 미초기화 상태면 무시 */ }
   await Reveal.initialize({
     hash: false,
     controls: true,
     progress: true,
     center: false,
+    slideNumber: "c/t",   // 슬라이드 번호 표시 (예: 1 / 7)
     transition: "slide",
     backgroundTransition: "fade",
     width: 1100,
@@ -244,6 +249,9 @@ async function buildSlides() {
     minScale: 0.5,
     maxScale: 1.5,
   });
+
+  const revealTotal = typeof Reveal.getTotalSlides === "function" ? Reveal.getTotalSlides() : "?";
+  console.log(`[KS] Reveal total slides: ${revealTotal}`);
 
   updateRevealTheme();
   const btn = document.getElementById("theme-toggle");
