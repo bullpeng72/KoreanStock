@@ -5,7 +5,7 @@ load_dotenv()
 
 class Config:
     # Version
-    VERSION = "0.2.2"
+    VERSION = "0.2.3"
 
     # Project Root
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -14,6 +14,7 @@ class Config:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID")
     NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET")
+    DART_API_KEY = os.getenv("DART_API_KEY", "")
     
     # Database
     DB_PATH = os.getenv("DB_PATH", "data/storage/stock_analysis.db")

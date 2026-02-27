@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import pandas as pd
 import logging
@@ -126,6 +127,48 @@ class DatabaseManager:
                     FOREIGN KEY (code) REFERENCES stocks(code)
                 )
             ''')
+
+            # 7. 뉴스 감성 캐시 테이블 (GitHub Actions 재실행 비용 절감)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS sentiment_cache (
+                    cache_key  TEXT PRIMARY KEY,
+                    result_json TEXT NOT NULL,
+                    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
+    def get_sentiment_cache(self, cache_key: str) -> Optional[Dict]:
+        """당일 감성 분석 캐시 조회. 없으면 None 반환."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'SELECT result_json FROM sentiment_cache WHERE cache_key = ?',
+                    (cache_key,)
+                )
+                row = cursor.fetchone()
+                if row:
+                    return json.loads(row[0])
+        except Exception as e:
+            logger.warning(f"sentiment_cache 조회 실패: {e}")
+        return None
+
+    def save_sentiment_cache(self, cache_key: str, result: Dict) -> None:
+        """감성 분석 결과를 SQLite에 저장하고 7일 지난 항목은 정리."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'INSERT OR REPLACE INTO sentiment_cache (cache_key, result_json) VALUES (?, ?)',
+                    (cache_key, json.dumps(result, ensure_ascii=False))
+                )
+                # 7일 이상 된 캐시 자동 정리
+                cursor.execute(
+                    "DELETE FROM sentiment_cache WHERE created_at < datetime('now', '-7 days')"
+                )
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"sentiment_cache 저장 실패: {e}")
 
     def save_analysis_history(self, res: Dict):
         """분석 결과 이력 저장"""

@@ -32,7 +32,7 @@ class AnalysisAgent:
 
         # 3. 뉴스 감성 분석 (ML 예측보다 먼저 수행하여 블렌딩에 활용)
         from core.engine.news_agent import news_agent
-        news_res = news_agent.get_sentiment_score(name or code)
+        news_res = news_agent.get_sentiment_score(name or code, stock_code=code)
         sentiment_score = news_res.get("sentiment_score", 0)
 
         # 4. ML 예측 점수 산출 (순수 ML 앙상블; sentiment 블렌딩은 composite 단계에서 일원화)

@@ -1,6 +1,6 @@
 # 📈 Korean Stocks AI/ML Analysis System
 
-![version](https://img.shields.io/badge/version-0.2.2-blue)
+![version](https://img.shields.io/badge/version-0.2.3-blue)
 
 > **KOSPI · KOSDAQ 종목을 AI와 머신러닝으로 분석하는 자동화 투자 보조 플랫폼**
 
@@ -128,8 +128,11 @@ KRX 전체 상장 종목
        예측 의미: 향후 5거래일 크로스섹셔널 순위 (0=최하위, 50=평균, 100=최상위)
 
 3단계  뉴스 감성 분석              → sentiment_score (-100–100)
-       Naver News API → 최신 뉴스 15건 → GPT-4o-mini 감성 점수
-       최신 뉴스(당일·1일 전)에 높은 가중치 부여
+       Naver News API (display=30, 중복 제거 후 고유 기사 확보)
+       + DART 공시 API (최근 30일, 유상증자·합병·수주 등 공식 공시)
+       지수 감쇠 시간 가중치 적용 (오늘=1.00 / 7일 전=0.09)
+       → GPT-4o-mini 감성 분석 (temperature=0.1)
+       결과는 L1 메모리 + L2 SQLite에 당일 캐시 (API 비용 절감)
 
 4단계  AI 종합 의견                → action (BUY/HOLD/SELL)
        GPT-4o-mini에 전 단계 데이터 + 점수 기준표 전달
@@ -326,15 +329,17 @@ TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
 TELEGRAM_CHAT_ID=YOUR_TELEGRAM_CHAT_ID
 NAVER_CLIENT_ID=YOUR_NAVER_CLIENT_ID
 NAVER_CLIENT_SECRET=YOUR_NAVER_CLIENT_SECRET
+DART_API_KEY=YOUR_DART_API_KEY
 DB_PATH=data/storage/stock_analysis.db
 ```
 
-| 변수 | 발급처 |
-|------|--------|
-| `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) |
-| `TELEGRAM_BOT_TOKEN` | 텔레그램 [@BotFather](https://t.me/BotFather) |
-| `TELEGRAM_CHAT_ID` | 텔레그램 [@userinfobot](https://t.me/userinfobot) |
-| `NAVER_CLIENT_ID/SECRET` | [developers.naver.com](https://developers.naver.com) — 검색 API 신청 |
+| 변수 | 발급처 | 필수 여부 |
+|------|--------|---------|
+| `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) | 필수 |
+| `TELEGRAM_BOT_TOKEN` | 텔레그램 [@BotFather](https://t.me/BotFather) | 선택 |
+| `TELEGRAM_CHAT_ID` | 텔레그램 [@userinfobot](https://t.me/userinfobot) | 선택 |
+| `NAVER_CLIENT_ID/SECRET` | [developers.naver.com](https://developers.naver.com) — 검색 API 신청 | 선택 |
+| `DART_API_KEY` | [opendart.fss.or.kr](https://opendart.fss.or.kr) — 오픈 API 신청 (무료) | 선택 |
 
 ### 5. ML 모델 학습 (최초 1회)
 ```bash
