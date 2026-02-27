@@ -7,10 +7,10 @@
     "max_features": 0.5
   },
   "training_samples": 44444,
-  "test_rmse": 28.8046,
-  "test_r2": 0.0043,
-  "training_duration": 3.6,
-  "performance_improvement": 0.22,
-  "saved_at": "2026-02-27T14:09:14.722459",
-  "model_version": "random_forest_v20260227_140914"
+  "test_rmse": 28.7945,
+  "test_r2": 0.005,
+  "training_duration": 15.8,
+  "performance_improvement": 0.25,
+  "saved_at": "2026-02-27T20:49:19.284431",
+  "model_version": "random_forest_v20260227_204919"
 }

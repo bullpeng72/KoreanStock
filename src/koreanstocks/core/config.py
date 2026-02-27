@@ -8,15 +8,25 @@ def _resolve_base_dir() -> str:
     """저장소 루트 결정.
 
     우선순위:
-    1) KOREANSTOCKS_BASE_DIR 환경변수 (전역 설치 또는 임의 경로 사용 시)
-    2) __file__ 기준 3단계 상위 (editable install: src/koreanstocks/core/ → 저장소 루트)
+    1) KOREANSTOCKS_BASE_DIR 환경변수 (임의 경로 지정 시)
+    2) __file__ 기준 4단계 상위에 pyproject.toml이 있으면 프로젝트 루트
+       (editable install: src/koreanstocks/core/ → src/koreanstocks/ → src/ → 루트/)
+    3) ~/.koreanstocks/ — PyPI 전역 설치 시 사용자 홈 디렉토리
     """
     from_env = os.getenv("KOREANSTOCKS_BASE_DIR")
     if from_env:
         return os.path.abspath(from_env)
-    return os.path.dirname(
+
+    candidate = os.path.dirname(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     )
+    if os.path.isfile(os.path.join(candidate, "pyproject.toml")):
+        return candidate
+
+    # PyPI 전역 설치: site-packages 구조이므로 사용자 홈 디렉토리로 fallback
+    home_base = os.path.join(os.path.expanduser("~"), ".koreanstocks")
+    os.makedirs(home_base, exist_ok=True)
+    return home_base
 
 
 class Config:
@@ -48,6 +58,13 @@ class Config:
     TRANSACTION_FEE = 0.00015  # 0.015%
     TAX_RATE = 0.0018         # 0.18%
     
+    # GitHub DB 동기화 URL (koreanstocks sync 명령용)
+    # 저장소를 포크했거나 private인 경우 KOREANSTOCKS_GITHUB_DB_URL 환경변수로 재정의
+    GITHUB_RAW_DB_URL: str = os.getenv(
+        "KOREANSTOCKS_GITHUB_DB_URL",
+        "https://raw.githubusercontent.com/bullpeng72/KoreanStock/main/data/storage/stock_analysis.db",
+    )
+
     # Cache Settings
     CACHE_EXPIRE_STOCKS = 1800  # 30 mins
     CACHE_EXPIRE_MARKET = 300   # 5 mins

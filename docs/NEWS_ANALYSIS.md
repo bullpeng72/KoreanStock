@@ -169,21 +169,33 @@ DART 공시는 별도 섹션으로 분리해 GPT가 뉴스 헤드라인보다 �
 
 ### 4-3. 출력 스키마
 
+GPT가 반환하는 필드(4개) + Python이 추가하는 필드(1개)로 구성된다.
+
 ```json
 {
   "sentiment_score": -45,
   "sentiment_label": "Bearish",
   "reason": "엔비디아 급락 여파로 반도체주 전반 약세, DART 공시 없음",
-  "top_news": "美반도체주 약세에 삼성전자·SK하이닉스 하락 출발"
+  "top_news": "美반도체주 약세에 삼성전자·SK하이닉스 하락 출발",
+  "articles": [
+    {"title": "美반도체주 약세에 삼성전자·SK하이닉스 하락 출발",
+     "link": "https://...",
+     "originallink": "https://...",
+     "pubDate": "Thu, 27 Feb 2026 09:30:00 +0900",
+     "days_ago": "오늘"}
+  ]
 }
 ```
 
-| 필드 | 범위 | 설명 |
-|------|------|------|
-| sentiment_score | -100 ~ 100 | 음수: 악재, 양수: 호재 |
-| sentiment_label | Very Bullish / Bullish / Neutral / Bearish / Very Bearish | 구간 레이블 |
-| reason | 한 문장 | 공시·고가중치 뉴스 위주 산출 근거 |
-| top_news | 한 문장 | 가장 영향력 큰 단일 항목 요약 |
+| 필드 | 출처 | 범위 | 설명 |
+|------|------|------|------|
+| sentiment_score | GPT | -100 ~ 100 | 음수: 악재, 양수: 호재 |
+| sentiment_label | GPT | Very Bullish / Bullish / Neutral / Bearish / Very Bearish | 구간 레이블 |
+| reason | GPT | 한 문장 | 공시·고가중치 뉴스 위주 산출 근거 |
+| top_news | GPT | 한 문장 | 가장 영향력 큰 단일 항목 요약 |
+| articles | Python | 배열 | 수집·필터링된 뉴스 원본 목록 (`title`, `link`, `originallink`, `pubDate`, `days_ago`) |
+
+> `articles` 필드는 GPT 응답 후 Python에서 직접 추가된다. 뉴스가 없을 때는 `[]` 빈 배열.
 
 ### 4-4. 점수 해석 기준
 

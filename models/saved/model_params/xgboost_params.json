@@ -10,10 +10,10 @@
     "reg_lambda": 1.0
   },
   "training_samples": 44444,
-  "test_rmse": 28.8422,
-  "test_r2": 0.0017,
-  "training_duration": 0.3,
-  "performance_improvement": 0.08,
-  "saved_at": "2026-02-27T14:09:47.315159",
-  "model_version": "xgboost_v20260227_140947"
+  "test_rmse": 28.8319,
+  "test_r2": 0.0024,
+  "training_duration": 1.7,
+  "performance_improvement": 0.12,
+  "saved_at": "2026-02-27T20:50:16.215375",
+  "model_version": "xgboost_v20260227_205016"
 }

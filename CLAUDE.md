@@ -7,12 +7,12 @@ KOSPI·KOSDAQ 종목을 기술적 지표, 머신러닝, 뉴스 감성 분석으�
 1. **Decoupling:** 비즈니스 로직(`koreanstocks.core/`)과 API/UI를 엄격히 분리. API 서버 없이도 CLI로 분석 엔진이 독립 동작해야 함.
 2. **Validation First:** 모든 전략과 ML 모델은 백테스팅 결과를 동반해야 함.
 3. **Cost Control:** LLM(GPT-4o-mini) 호출 전 전처리로 비용 최적화. `max_tokens` 제한 필수.
-4. **Automation:** 데이터 수집·분석·알림은 GitHub Actions 스케줄러가 담당 (평일 16:30 KST). SQLite DB는 GitHub Artifact로 자동 백업 (90일 보존).
+4. **Automation:** 데이터 수집·분석·알림은 GitHub Actions 스케줄러가 담당 (평일 16:30 KST). SQLite DB는 저장소에 자동 커밋·푸시되며, GitHub Artifact로도 병행 백업 (90일 보존).
 
 ## 기술 스택
 
 - **UI:** FastAPI + Reveal.js (일일 브리핑 슬라이드) + Vanilla JS (인터랙티브 대시보드)
-- **CLI:** Typer (`koreanstocks serve / recommend / analyze / train / init`)
+- **CLI:** Typer (`koreanstocks serve / recommend / analyze / train / init / sync`)
 - **AI/LLM:** OpenAI GPT-4o-mini
 - **ML:** Scikit-learn (Random Forest, Gradient Boosting), XGBoost
 - **기술 지표:** `ta` 라이브러리 (RSI, MACD, Bollinger Bands, SMA, OBV)
@@ -30,7 +30,7 @@ requirements.txt                     # 개발/테스트 전용 (pytest 등)
 src/
 └── koreanstocks/
     ├── __init__.py                  # VERSION = "0.2.3"
-    ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init)
+    ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init/sync)
     ├── api/
     │   ├── app.py                   # FastAPI 앱 팩토리, StaticFiles 마운트
     │   ├── dependencies.py          # 공통 의존성 (db_manager, analysis_agent 등)
@@ -90,11 +90,16 @@ tests/
 ## 주요 명령어
 
 ```bash
-# 패키지 설치 (편집 가능 모드)
-pip install -e .
+# 패키지 설치
+pip install -e .              # 개발 / git clone 환경 (editable)
+pip install koreanstocks      # PyPI 전역 설치 (DB는 ~/.koreanstocks/ 에 생성)
 
 # 초기 설정 (.env 생성 + API 키 안내)
 koreanstocks init
+
+# GitHub Actions 생성 DB 다운로드 (PyPI 설치 후 추천 데이터 즉시 사용 가능)
+koreanstocks sync              # 최초 수신 또는 날짜 갱신
+koreanstocks sync --force      # 로컬 DB가 있어도 강제 덮어쓰기
 
 # 웹 대시보드 실행 (브라우저 자동 실행)
 koreanstocks serve                     # http://localhost:8000/dashboard
@@ -129,6 +134,12 @@ NAVER_CLIENT_ID=...         # 필수: 뉴스 검색 API
 NAVER_CLIENT_SECRET=...
 DART_API_KEY=...            # 선택: 금융감독원 공시 수집 (미설정 시 뉴스만 사용)
 DB_PATH=data/storage/stock_analysis.db
+
+# 경로 재정의 (기본값 그대로 사용 권장)
+# KOREANSTOCKS_BASE_DIR=...           # 데이터 루트 강제 지정 (미설정 시 자동 탐지)
+#   - editable install (pip install -e .): pyproject.toml 기준 프로젝트 루트
+#   - PyPI 전역 설치: ~/.koreanstocks/ 자동 생성·사용
+# KOREANSTOCKS_GITHUB_DB_URL=...      # sync 다운로드 URL (저장소 fork 시에만 변경)
 ```
 
 ## 코딩 규칙

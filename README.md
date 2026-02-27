@@ -36,7 +36,7 @@
 | **날짜별 히스토리** | 과거 30일 분석 결과를 날짜 선택으로 조회 |
 | **추천 지속성 히트맵** | 종목별 연속 추천 일수를 히트맵으로 시각화 (연속 2일+ 시 🔥 배지) |
 | **DB 우선 조회 & 세션 캐시** | '새로 분석 실행' 클릭 시 당일 저장된 DB 결과 우선 표시 (불필요한 재분석 방지), 메뉴 이탈 후 재진입해도 결과 유지 |
-| **DB 자동 동기화** | GitHub Actions 완료 후 분석 DB를 자동으로 저장소에 커밋·푸시 → 로컬에서 `git pull` 한 번으로 최신 추천 결과 반영 |
+| **DB 자동 동기화** | GitHub Actions 완료 후 분석 DB를 저장소에 자동 커밋·푸시 → git clone 환경은 `git pull`, PyPI 설치 환경은 `koreanstocks sync` 한 번으로 최신 추천 결과 반영 |
 | **텔레그램 알림** | 종합점수 바·당일 등락률·RSI·뉴스 헤드라인·AI 강점 포함 구조화 리포트 발송 |
 | **전략 백테스팅** | RSI · MACD · COMPOSITE 전략 시뮬레이션 (단순보유 비교, 원금선 차트, 초보자 해석 가이드 포함) |
 | **관심 종목 관리** | Watchlist 등록 및 분석 이력 타임라인 제공 |
@@ -49,7 +49,7 @@
 
 ```
 UI          FastAPI + Reveal.js (일일 브리핑) + Vanilla JS (인터랙티브 대시보드)
-CLI         Typer (koreanstocks serve / recommend / analyze / train / init)
+CLI         Typer (koreanstocks serve / recommend / analyze / train / init / sync)
 AI/LLM      OpenAI GPT-4o-mini
 ML          Scikit-learn (Random Forest, Gradient Boosting), XGBoost
 기술 지표    ta (RSI, MACD, Bollinger Bands, SMA, OBV)
@@ -71,7 +71,7 @@ KoreanStocks/
 ├── src/
 │   └── koreanstocks/
 │       ├── __init__.py                  # VERSION = "0.2.3"
-│       ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init)
+│       ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init/sync)
 │       ├── api/
 │       │   ├── app.py                   # FastAPI 앱 팩토리, StaticFiles 마운트
 │       │   ├── dependencies.py          # 공통 의존성
@@ -326,19 +326,38 @@ AI 추천 + 아래 조건 중 2개 이상 충족 시 매수 검토 ✅
 
 ## ⚙️ 설치 및 실행
 
-### 1. 저장소 클론
+### 방법 A — PyPI 설치 (권장: 분석 결과 조회 전용)
+
+```bash
+# XGBoost 구동에 필요한 시스템 라이브러리 (Linux)
+sudo apt-get install -y libomp-dev
+
+pip install koreanstocks
+koreanstocks init          # .env 생성 후 API 키 입력
+koreanstocks sync          # GitHub Actions 생성 DB 다운로드
+koreanstocks serve         # http://localhost:8000/dashboard
+```
+
+> DB는 `~/.koreanstocks/data/storage/stock_analysis.db`에 저장됩니다.
+> 매일 장 마감 후 `koreanstocks sync --force`로 최신 추천 결과를 받아오세요.
+
+---
+
+### 방법 B — 저장소 클론 (개발 / 자체 분석 실행)
+
+#### 1. 저장소 클론
 ```bash
 git clone https://github.com/bullpeng72/KoreanStock.git
 cd KoreanStock
 ```
 
-### 2. Python 환경 설정 (Python 3.11 ~ 3.13)
+#### 2. Python 환경 설정 (Python 3.11 ~ 3.13)
 ```bash
 conda create -n stocks_env python=3.11   # 또는 3.12, 3.13
 conda activate stocks_env
 ```
 
-### 3. 패키지 설치
+#### 3. 패키지 설치
 ```bash
 # XGBoost 구동에 필요한 시스템 라이브러리
 # Ubuntu/Debian
@@ -349,7 +368,7 @@ conda install -c conda-forge llvm-openmp
 pip install -e .
 ```
 
-### 4. 환경 변수 설정 (`.env` 파일)
+### 4. 환경 변수 설정 (`.env` 파일) — 방법 A·B 공통
 
 `koreanstocks init` 으로 템플릿을 자동 생성할 수 있습니다:
 
@@ -374,8 +393,9 @@ DB_PATH=data/storage/stock_analysis.db
 | `TELEGRAM_CHAT_ID` | `api.telegram.org/bot<TOKEN>/getUpdates` 로 확인 | 필수 |
 | `NAVER_CLIENT_ID/SECRET` | [developers.naver.com](https://developers.naver.com) — 검색 API 신청 | 필수 |
 | `DART_API_KEY` | [opendart.fss.or.kr](https://opendart.fss.or.kr) — 오픈 API 신청 (무료) | 선택 |
+| `KOREANSTOCKS_GITHUB_DB_URL` | — 저장소를 fork한 경우 `koreanstocks sync` raw URL 재정의 | 선택 |
 
-### 5. ML 모델 학습 (최초 1회)
+### 5. ML 모델 학습 (방법 B / 최초 1회)
 ```bash
 koreanstocks train
 # 또는
@@ -421,7 +441,9 @@ NAVER_CLIENT_SECRET
   → 종합 점수 상위 5종목 선정
   → SQLite DB 날짜별 저장
   → GitHub Artifact에 DB 백업 (90일 보존)
-  → DB를 저장소에 자동 커밋·푸시 → 로컬 git pull로 즉시 반영
+  → DB를 저장소에 자동 커밋·푸시
+      └─ git clone 환경: git pull 로 즉시 반영
+      └─ PyPI 설치 환경: koreanstocks sync --force 로 즉시 반영
   → 텔레그램 리포트 발송
 ```
 

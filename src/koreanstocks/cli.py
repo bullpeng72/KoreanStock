@@ -43,6 +43,7 @@ def main(
     [bold]빠른 시작:[/bold]
 
     [green]  koreanstocks init[/green]       [dim]# .env 설정 파일 생성[/dim]
+    [green]  koreanstocks sync[/green]       [dim]# GitHub에서 최신 분석 DB 다운로드[/dim]
     [green]  koreanstocks serve[/green]      [dim]# 웹 대시보드 실행 (브라우저 자동 열림)[/dim]
     [green]  koreanstocks recommend[/green]  [dim]# 오늘의 추천 종목 분석[/dim]
     [green]  koreanstocks analyze 005930[/green]  [dim]# 삼성전자 단일 분석[/dim]
@@ -215,6 +216,105 @@ def train(
 
 
 @app.command()
+def sync(
+    force: bool = typer.Option(False, "--force", help="로컬 DB가 있어도 강제 덮어쓰기"),
+    token: Optional[str] = typer.Option(
+        None, "--token", envvar="GITHUB_TOKEN",
+        help="비공개 저장소용 GitHub Personal Access Token",
+    ),
+):
+    """
+    [bold]GitHub에서 최신 분석 DB 다운로드[/bold] — 다중 PC 동기화
+
+    GitHub Actions가 평일 16:30 KST에 생성한 추천 데이터를 로컬로 가져옵니다.
+    로컬 DB가 이미 존재하면 덮어쓰지 않습니다 ([cyan]--force[/cyan] 옵션으로 강제 가능).
+
+    [bold]저장 위치:[/bold]
+    [dim]  pip install -e .    →  (프로젝트루트)/data/storage/stock_analysis.db[/dim]
+    [dim]  pip install (PyPI)  →  ~/.koreanstocks/data/storage/stock_analysis.db[/dim]
+
+    [bold]비공개 저장소 사용 시:[/bold]
+    [dim]  GitHub → Settings → Developer settings → Personal access tokens[/dim]
+    [dim]  repo(read) 권한으로 토큰 발급 후 --token 또는 GITHUB_TOKEN 환경변수로 전달[/dim]
+
+    [bold]예시:[/bold]
+    [dim]  koreanstocks sync[/dim]
+    [dim]  koreanstocks sync --force[/dim]
+    [dim]  koreanstocks sync --token ghp_xxxx[/dim]
+    """
+    import httpx
+    from pathlib import Path
+    from koreanstocks.core.config import config
+
+    db_path = Path(config.DB_PATH)
+
+    if db_path.exists() and not force:
+        typer.echo(f"로컬 DB가 이미 존재합니다: {db_path}")
+        typer.echo("최신 데이터로 덮어쓰려면 --force 옵션을 사용하세요.")
+        raise typer.Exit()
+
+    url = config.GITHUB_RAW_DB_URL
+    typer.echo(f"다운로드: {url}")
+
+    headers: dict = {}
+    if token:
+        headers["Authorization"] = f"token {token}"
+
+    tmp_path = db_path.with_suffix(".tmp")
+    try:
+        with httpx.Client(follow_redirects=True, timeout=60.0) as client:
+            with client.stream("GET", url, headers=headers) as response:
+                if response.status_code == 401:
+                    typer.echo(
+                        "인증 실패. --token 옵션으로 GitHub Personal Access Token을 제공하거나\n"
+                        "GITHUB_TOKEN 환경변수를 설정하세요.",
+                        err=True,
+                    )
+                    raise typer.Exit(1)
+                if response.status_code == 404:
+                    typer.echo(
+                        "DB 파일을 찾을 수 없습니다 (404).\n"
+                        "GitHub Actions가 아직 한 번도 실행되지 않았거나\n"
+                        "저장소가 비공개 상태일 수 있습니다.",
+                        err=True,
+                    )
+                    raise typer.Exit(1)
+                response.raise_for_status()
+
+                total = int(response.headers.get("content-length", 0))
+                db_path.parent.mkdir(parents=True, exist_ok=True)
+
+                downloaded = 0
+                with open(tmp_path, "wb") as f:
+                    for chunk in response.iter_bytes(chunk_size=65536):
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total:
+                            pct = downloaded / total * 100
+                            typer.echo(
+                                f"\r  {downloaded // 1024:,} KB / {total // 1024:,} KB  ({pct:.0f}%)",
+                                nl=False,
+                            )
+
+                if total:
+                    typer.echo("")  # 진행률 줄바꿈
+
+        # 정상 수신 후 최종 경로로 이동 (원자적 교체)
+        tmp_path.replace(db_path)
+        typer.echo(f"완료: {db_path}  ({downloaded // 1024:,} KB)")
+
+    except httpx.RequestError as e:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        typer.echo(f"네트워크 오류: {e}", err=True)
+        raise typer.Exit(1)
+    except typer.Exit:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        raise
+
+
+@app.command()
 def init():
     """
     [bold]초기 설정[/bold] — .env 환경변수 템플릿 생성
@@ -282,8 +382,12 @@ def init():
         "DB_PATH=data/storage/stock_analysis.db\n"
         "\n"
         "# 프로젝트 루트 경로 (pip install -e . 로 editable 설치 시 자동 탐지됨)\n"
-        "# 전역 설치(pip install koreanstocks) 사용 시 아래 주석을 해제하고 경로를 입력\n"
-        "# KOREANSTOCKS_BASE_DIR=/path/to/KoreanStocks\n"
+        "# 전역 설치(pip install koreanstocks) 사용 시 ~/.koreanstocks/ 가 자동 사용됨\n"
+        "# 별도 경로를 지정하려면 아래 주석을 해제하고 경로를 입력\n"
+        "# KOREANSTOCKS_BASE_DIR=/path/to/data-dir\n"
+        "\n"
+        "# koreanstocks sync 다운로드 URL (저장소를 포크한 경우에만 변경)\n"
+        "# KOREANSTOCKS_GITHUB_DB_URL=https://raw.githubusercontent.com/{owner}/{repo}/main/data/storage/stock_analysis.db\n"
     )
     env_file.write_text(template, encoding="utf-8")
     typer.echo(".env 파일을 생성했습니다. API 키를 입력한 뒤 저장하세요.")
