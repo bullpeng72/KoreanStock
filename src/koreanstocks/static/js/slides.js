@@ -82,13 +82,19 @@ function coverSlide(market, date, count) {
 }
 
 // ── 종목 슬라이드 ────────────────────────────────────────────────
+function toStrList(val) {
+  if (!val) return "";
+  if (Array.isArray(val)) return val.join(" · ");
+  return String(val);
+}
+
 function stockSlide(rec) {
   const opinion  = rec.ai_opinion || {};
   const action   = opinion.action || "HOLD";
   const si       = rec.sentiment_info || {};
   const news     = si.headlines || si.articles?.slice(0,3).map(a => a.title) || [];
-  const strength = opinion.strength || "";
-  const weakness = opinion.weakness || "";
+  const strength = toStrList(opinion.strength);
+  const weakness = toStrList(opinion.weakness);
   const ml_score  = rec.ml_score != null ? rec.ml_score : (rec.tech_score || 0);
   const sent_norm = Math.min(100, Math.max(0, ((rec.sentiment_score || 0) + 100) / 2));
 
@@ -223,25 +229,21 @@ async function buildSlides() {
   const overlay = document.getElementById("loading-overlay");
   if (overlay) overlay.style.display = "none";
 
-  // Reveal.js 5.x: initialize()는 최초 1회만, 이후 동적 슬라이드 추가 시 sync() 사용
-  if (Reveal.isReady()) {
-    Reveal.sync();
-    Reveal.slide(0);
-  } else {
-    await Reveal.initialize({
-      hash: true,
-      controls: true,
-      progress: true,
-      center: false,
-      transition: "slide",
-      backgroundTransition: "fade",
-      width: 1100,
-      height: 700,
-      margin: 0.05,
-      minScale: 0.5,
-      maxScale: 1.5,
-    });
-  }
+  // Reveal.js: destroy 후 재초기화 (슬라이드 동적 삽입 후 확실히 인식하도록)
+  try { Reveal.destroy(); } catch(e) { /* 미초기화 상태면 무시 */ }
+  await Reveal.initialize({
+    hash: false,
+    controls: true,
+    progress: true,
+    center: false,
+    transition: "slide",
+    backgroundTransition: "fade",
+    width: 1100,
+    height: 700,
+    margin: 0.05,
+    minScale: 0.5,
+    maxScale: 1.5,
+  });
 
   updateRevealTheme();
   const btn = document.getElementById("theme-toggle");
