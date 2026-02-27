@@ -58,7 +58,7 @@ class AnalysisAgent:
 
         # 시장 구분·섹터 정보 (stock_list 캐시에서 조회)
         stock_list = data_provider.get_stock_list()
-        _row = stock_list[stock_list['code'] == code]
+        _row = stock_list[stock_list['code'] == code] if 'code' in stock_list.columns else stock_list.iloc[0:0]
         market_val   = str(_row.iloc[0]['market'])   if not _row.empty else ''
         sector_val   = str(_row.iloc[0].get('sector',   '') or '') if not _row.empty else ''
         industry_val = str(_row.iloc[0].get('industry', '') or '') if not _row.empty else ''

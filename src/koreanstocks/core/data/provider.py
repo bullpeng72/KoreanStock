@@ -79,7 +79,7 @@ class StockDataProvider:
             return df
         except Exception as e:
             logger.error(f"Error fetching stock list: {e}")
-            return pd.DataFrame()
+            return self._krx_cache if self._krx_cache is not None else pd.DataFrame(columns=['code', 'name', 'market', 'sector', 'industry'])
 
     def get_ohlcv(self, code: str, start: str = None, end: str = None, period: str = '1y') -> pd.DataFrame:
         """특정 종목의 OHLCV(시가, 고가, 저가, 종가, 거래량) 데이터를 반환 (5분 캐시 적용)"""

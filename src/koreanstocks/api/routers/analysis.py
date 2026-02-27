@@ -21,6 +21,8 @@ def _run_async(code: str, name: str):
 
 def _resolve_name(code: str, dp) -> str:
     stock_list = dp.get_stock_list()
+    if "code" not in stock_list.columns:
+        return code
     row = stock_list[stock_list["code"] == code]
     return row.iloc[0]["name"] if not row.empty else code
 
@@ -53,7 +55,10 @@ def trigger_analysis_async(
     """비동기 분석 트리거. 즉시 202 반환, DB에 결과 저장 후 GET으로 조회."""
     if code in _in_progress:
         return {"status": "already_running", "code": code}
-    name = _resolve_name(code, dp)
+    try:
+        name = _resolve_name(code, dp)
+    except Exception:
+        name = code
     _in_progress.add(code)
     background_tasks.add_task(_run_async, code, name)
     return {"status": "started", "code": code, "name": name}
@@ -66,8 +71,8 @@ def run_analysis_sync(
     dp=Depends(get_data_provider),
 ):
     """동기 실시간 분석 (Watchlist 상세 분석용). 최대 60초 대기."""
-    name = _resolve_name(code, dp)
     try:
+        name = _resolve_name(code, dp)
         result = agent.analyze_stock(code, name)
         if result is None:
             raise HTTPException(status_code=500, detail="분석 결과 없음")
