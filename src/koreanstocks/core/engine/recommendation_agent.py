@@ -4,9 +4,9 @@ import logging
 from datetime import date
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
-from core.data.provider import data_provider
-from core.engine.analysis_agent import analysis_agent
-from core.data.database import db_manager
+from koreanstocks.core.data.provider import data_provider
+from koreanstocks.core.engine.analysis_agent import analysis_agent
+from koreanstocks.core.data.database import db_manager
 
 logger = logging.getLogger(__name__)
 

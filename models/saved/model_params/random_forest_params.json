@@ -6,11 +6,11 @@
     "min_samples_leaf": 15,
     "max_features": 0.5
   },
-  "training_samples": 44445,
-  "test_rmse": 28.8067,
-  "test_r2": 0.0042,
-  "training_duration": 4.1,
-  "performance_improvement": 0.21,
-  "saved_at": "2026-02-26T16:04:18.616064",
-  "model_version": "random_forest_v20260226_160418"
+  "training_samples": 44444,
+  "test_rmse": 28.8046,
+  "test_r2": 0.0043,
+  "training_duration": 3.6,
+  "performance_improvement": 0.22,
+  "saved_at": "2026-02-27T14:09:14.722459",
+  "model_version": "random_forest_v20260227_140914"
 }

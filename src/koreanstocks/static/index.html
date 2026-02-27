@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KoreanStocks — 일일 브리핑</title>
+  <!-- 플래시 방지: 렌더링 전에 테마 적용 -->
+  <script>(function(){var t=localStorage.getItem('ks-theme');if(!t)t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.setAttribute('data-theme',t);})()</script>
+
+  <!-- Reveal.js CDN -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css" />
+  <link id="reveal-theme" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css" />
+
+  <!-- 공통 스타일 -->
+  <link rel="stylesheet" href="/static/css/theme.css" />
+</head>
+<body>
+  <!-- 테마 토글 플로팅 버튼 -->
+  <button id="theme-toggle" class="btn-theme-float" onclick="toggleTheme()" title="테마 전환">☀️</button>
+
+  <div class="reveal">
+    <div class="slides" id="slide-container">
+      <!-- slides.js가 슬라이드를 동적으로 삽입합니다 -->
+      <section>
+        <p style="color:#8b949e">데이터를 불러오는 중...</p>
+      </section>
+    </div>
+  </div>
+
+  <!-- Reveal.js 코어 -->
+  <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+
+  <!-- 슬라이드 빌더 -->
+  <script src="/static/js/slides.js"></script>
+</body>
+</html>

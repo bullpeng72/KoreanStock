@@ -20,7 +20,7 @@
 ## 1. 개요
 
 뉴스 감성 분석은 기술적 지표(tech_score)·ML 예측(ml_score)과 함께 종합 점수(composite)를 구성하는 세 번째 축이다.
-주요 담당 클래스: `core/engine/news_agent.py` → `NewsAgent`
+주요 담당 클래스: `src/koreanstocks/core/engine/news_agent.py` → `NewsAgent`
 
 ```
 수집 (Naver News + DART 공시)
@@ -244,7 +244,7 @@ CREATE TABLE sentiment_cache (
 | 당일 첫 실행 | L2 미스 → API·GPT 호출 → DB 저장 |
 | 당일 재실행 | L2 히트 → API·GPT 비용 0 |
 | 익일 실행 | 키 불일치 → 재수집 |
-| 앱 재시작 (Streamlit) | L1 초기화되지만 L2 히트 |
+| 앱 재시작 (서버 재시작) | L1 초기화되지만 L2 히트 |
 
 ---
 

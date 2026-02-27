@@ -21,9 +21,9 @@
 기술적 분석은 OHLCV(시가·고가·저가·종가·거래량) 데이터를 기반으로 `tech_score`를 산출하고, 전략별 매수/매도 시그널을 생성한다.
 
 주요 담당 클래스:
-- `core/engine/indicators.py` → `IndicatorCalculator` (지표 계산 + 종합 점수)
-- `core/engine/strategy.py` → `TechnicalStrategy` (시그널 생성)
-- `core/utils/backtester.py` → `Backtester` (전략 성과 검증)
+- `src/koreanstocks/core/engine/indicators.py` → `IndicatorCalculator` (지표 계산 + 종합 점수)
+- `src/koreanstocks/core/engine/strategy.py` → `TechnicalStrategy` (시그널 생성)
+- `src/koreanstocks/core/utils/backtester.py` → `Backtester` (전략 성과 검증)
 
 ```
 OHLCV 데이터

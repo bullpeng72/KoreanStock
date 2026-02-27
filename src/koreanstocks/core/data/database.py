@@ -5,7 +5,7 @@ import logging
 import os
 from datetime import datetime
 from typing import List, Dict, Optional, Any
-from core.config import config
+from koreanstocks.core.config import config
 
 logger = logging.getLogger(__name__)
 

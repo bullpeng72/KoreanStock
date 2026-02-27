@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, List
-from core.config import config
+from koreanstocks.core.config import config
 
 class Backtester:
     """주식 투자 전략의 성과를 검증하는 백테스팅 엔진"""

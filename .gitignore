@@ -31,6 +31,11 @@ wheels/
 # OS
 .DS_Store
 
+# Test / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
 # Models
 models/saved/prediction_models/*.pkl
 models/saved/model_params/*.json

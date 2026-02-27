@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KoreanStocks — 대시보드</title>
+  <!-- 플래시 방지: 렌더링 전에 테마 적용 -->
+  <script>(function(){var t=localStorage.getItem('ks-theme');if(!t)t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.setAttribute('data-theme',t);})()</script>
+  <link rel="stylesheet" href="/static/css/theme.css" />
+</head>
+<body>
+
+<!-- ── 상단 탭 내비게이션 ─────────────────────────────────────── -->
+<nav class="top-nav">
+  <span class="nav-brand">📈 KoreanStocks</span>
+  <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+  <button class="tab-btn" data-tab="watchlist">Watchlist</button>
+  <button class="tab-btn" data-tab="recommendations">AI 추천</button>
+  <button class="tab-btn" data-tab="backtest">백테스트</button>
+  <button class="tab-btn" data-tab="settings">설정</button>
+  <div class="nav-right">
+    <a href="/">브리핑</a>
+    <a href="/docs">API</a>
+    <button id="theme-toggle" class="btn-theme-toggle" onclick="toggleTheme()" title="테마 전환">☀️</button>
+  </div>
+</nav>
+
+<div class="main">
+
+  <!-- ══════════════════════════════════════════════════════════
+       Tab 1 — Dashboard
+  ══════════════════════════════════════════════════════════ -->
+  <div class="tab-panel active" id="tab-dashboard">
+
+    <!-- 시장 지수 -->
+    <div class="idx-grid" id="market-indices">
+      <div class="idx-card" id="idx-kospi">
+        <div class="idx-label">KOSPI</div>
+        <div class="idx-val">—</div>
+        <div class="idx-chg">—</div>
+      </div>
+      <div class="idx-card" id="idx-kosdaq">
+        <div class="idx-label">KOSDAQ</div>
+        <div class="idx-val">—</div>
+        <div class="idx-chg">—</div>
+      </div>
+      <div class="idx-card" id="idx-usdkrw">
+        <div class="idx-label">USD/KRW</div>
+        <div class="idx-val">—</div>
+        <div class="idx-chg"></div>
+      </div>
+    </div>
+
+    <!-- Portfolio Summary -->
+    <div class="card">
+      <div class="card-title">📁 My Portfolio Summary</div>
+      <div id="portfolio-summary" style="color:var(--muted);font-size:.9em">로딩 중…</div>
+    </div>
+
+    <!-- AI Analysis Reports -->
+    <div class="card">
+      <div class="flex-row" style="margin-bottom:12px">
+        <div class="card-title" style="margin:0">🎯 AI Analysis Reports</div>
+        <div class="spacer"></div>
+        <label class="inline-label" style="display:inline;margin:0">날짜:</label>
+        <select id="dash-date-sel" style="width:160px"></select>
+      </div>
+
+      <!-- 테마 필터 -->
+      <div class="theme-filter" id="dash-theme-filter"></div>
+
+      <!-- 추천 카드 목록 -->
+      <div id="dash-rec-list"><span style="color:var(--muted)">데이터를 로드 중입니다…</span></div>
+    </div>
+
+    <!-- 추천 지속성 히트맵 -->
+    <div class="card">
+      <div class="flex-row" style="margin-bottom:12px">
+        <div class="card-title" style="margin:0">📅 추천 지속성 히트맵</div>
+        <div class="spacer"></div>
+        <div class="theme-filter" style="margin:0" id="heatmap-days-filter">
+          <button class="theme-btn" data-days="7">7일</button>
+          <button class="theme-btn active" data-days="14">14일</button>
+          <button class="theme-btn" data-days="30">30일</button>
+        </div>
+      </div>
+      <div class="heatmap-wrap" id="dash-heatmap">
+        <span style="color:var(--muted);font-size:.85em">히트맵을 불러오는 중…</span>
+      </div>
+    </div>
+
+  </div><!-- /tab-dashboard -->
+
+  <!-- ══════════════════════════════════════════════════════════
+       Tab 2 — Watchlist
+  ══════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="tab-watchlist">
+
+    <div class="card">
+      <div class="card-title">⭐ My Watchlist</div>
+
+      <!-- 추가 폼 -->
+      <div class="flex-row" style="margin-bottom:16px">
+        <input type="text" id="wl-code-input" placeholder="종목 코드 (예: 005930)" style="width:200px" />
+        <button class="btn btn-primary" onclick="addWatchlist()">추가</button>
+        <span class="status-msg" id="wl-add-status"></span>
+      </div>
+
+      <!-- 종목 카드 목록 -->
+      <div id="wl-list"><span style="color:var(--muted)">로딩 중…</span></div>
+    </div>
+
+  </div><!-- /tab-watchlist -->
+
+  <!-- ══════════════════════════════════════════════════════════
+       Tab 3 — AI Recommendations
+  ══════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="tab-recommendations">
+
+    <!-- 설정 / 실행 -->
+    <div class="card">
+      <div class="card-title">⚙️ 분석 설정</div>
+      <div class="flex-row">
+        <div>
+          <label class="inline-label">시장</label>
+          <select id="rec-market">
+            <option value="ALL">전체</option>
+            <option value="KOSPI">KOSPI</option>
+            <option value="KOSDAQ">KOSDAQ</option>
+          </select>
+        </div>
+        <div>
+          <label class="inline-label">테마</label>
+          <select id="rec-theme">
+            <option value="전체">전체</option>
+            <option value="AI/인공지능">AI/인공지능</option>
+            <option value="반도체">반도체</option>
+            <option value="이차전지">이차전지</option>
+            <option value="제약/바이오">제약/바이오</option>
+            <option value="로봇/자동화">로봇/자동화</option>
+          </select>
+        </div>
+        <div>
+          <label class="inline-label">종목 수</label>
+          <select id="rec-limit">
+            <option value="3">3</option>
+            <option value="5" selected>5</option>
+            <option value="10">10</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="runRecommendations()" style="align-self:flex-end">🔄 새로 분석 실행</button>
+        <span class="status-msg" id="rec-run-status" style="align-self:flex-end"></span>
+      </div>
+    </div>
+
+    <!-- 날짜 조회 -->
+    <div class="card">
+      <div class="flex-row" style="margin-bottom:12px">
+        <div class="card-title" style="margin:0">🤖 추천 종목</div>
+        <div class="spacer"></div>
+        <label class="inline-label" style="display:inline;margin:0">날짜:</label>
+        <select id="rec-date-sel" style="width:160px" onchange="loadRecsByDate()"></select>
+      </div>
+
+      <!-- 테마 필터 -->
+      <div class="theme-filter" id="rec-theme-filter"></div>
+
+      <div id="rec-list"><span style="color:var(--muted)">날짜를 선택하거나 새로 분석을 실행하세요.</span></div>
+    </div>
+
+    <!-- 히트맵 -->
+    <div class="card">
+      <div class="flex-row" style="margin-bottom:12px">
+        <div class="card-title" style="margin:0">📅 추천 지속성 히트맵</div>
+        <div class="spacer"></div>
+        <div class="theme-filter" style="margin:0" id="rec-heatmap-days">
+          <button class="theme-btn" data-days="7">7일</button>
+          <button class="theme-btn active" data-days="14">14일</button>
+          <button class="theme-btn" data-days="30">30일</button>
+        </div>
+      </div>
+      <div class="heatmap-wrap" id="rec-heatmap">
+        <span style="color:var(--muted);font-size:.85em">히트맵을 불러오는 중…</span>
+      </div>
+    </div>
+
+  </div><!-- /tab-recommendations -->
+
+  <!-- ══════════════════════════════════════════════════════════
+       Tab 4 — Backtest
+  ══════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="tab-backtest">
+
+    <div class="card">
+      <div class="card-title">📈 Strategy Backtest Viewer</div>
+      <p style="color:var(--muted);font-size:.88em;margin-top:0">
+        "이 전략을 과거에 사용했다면?" — 실제 돈은 사용되지 않는 가상 시뮬레이션입니다.
+        과거 성과가 미래 수익을 보장하지 않습니다.
+      </p>
+
+      <!-- ① 종목 코드 -->
+      <div style="margin-bottom:16px">
+        <label class="inline-label">① 종목 코드 (6자리)</label>
+        <input type="text" id="bt-code" value="005930" style="width:140px" />
+        <span style="font-size:.78em;color:var(--muted);margin-left:8px">
+          예) 삼성전자 005930 · SK하이닉스 000660 · NAVER 035420
+        </span>
+      </div>
+
+      <!-- ② 전략 선택 -->
+      <div style="margin-bottom:16px">
+        <label class="inline-label">② 전략</label>
+        <div class="theme-filter" id="strategy-filter">
+          <button class="theme-btn active" data-strategy="RSI">RSI</button>
+          <button class="theme-btn" data-strategy="MACD">MACD</button>
+          <button class="theme-btn" data-strategy="COMPOSITE">COMPOSITE</button>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="toggleEl('strategy-desc')">
+          📖 전략 설명 보기
+        </button>
+        <div class="toggle-content" id="strategy-desc" style="margin-top:12px;padding:14px;background:var(--bg-dark);border-radius:8px;font-size:.84em;line-height:1.8">
+          <strong>🌡️ RSI</strong> — RSI &lt; 40 매수 / &gt; 60 매도 (과매도/과매수 역추세)<br>
+          <strong>📉 MACD</strong> — MACD 골든크로스 매수 / 데드크로스 매도 (추세 추종)<br>
+          <strong>🔐 COMPOSITE</strong> — RSI &lt; 50 <em>그리고</em> MACD 골든크로스일 때만 매수 (신중한 복합 전략)
+        </div>
+      </div>
+
+      <!-- ③ 기간 + 금액 -->
+      <div class="flex-row" style="margin-bottom:16px">
+        <div>
+          <label class="inline-label">③ 기간</label>
+          <select id="bt-period">
+            <option value="3m">3개월</option>
+            <option value="6m">6개월</option>
+            <option value="1y" selected>1년 (권장)</option>
+            <option value="2y">2년</option>
+          </select>
+        </div>
+        <div>
+          <label class="inline-label">투자 금액 (원)</label>
+          <input type="number" id="bt-capital" value="10000000" step="1000000" style="width:150px" />
+        </div>
+        <button class="btn btn-primary" onclick="runBacktest()" style="align-self:flex-end">▶ 백테스트 실행</button>
+      </div>
+      <div class="status-msg" id="bt-status"></div>
+    </div>
+
+    <!-- 결과 섹션 -->
+    <div id="bt-result" style="display:none">
+
+      <div id="bt-verdict" class="bt-verdict"></div>
+
+      <div class="result-grid" id="bt-metrics"></div>
+
+      <div id="bt-bnh-compare" style="padding:8px 12px;border-radius:6px;background:var(--bg-card);border:1px solid var(--border);font-size:.85em;margin-bottom:16px"></div>
+
+      <!-- 차트 -->
+      <div class="card" style="padding:16px">
+        <div class="card-title">누적 수익률 차트</div>
+        <canvas id="bt-chart" height="300"></canvas>
+      </div>
+
+      <!-- 해석 가이드 -->
+      <div class="card">
+        <div class="flex-row" style="margin-bottom:8px">
+          <div class="card-title" style="margin:0">📖 결과 해석 가이드</div>
+          <button class="btn btn-secondary btn-sm" onclick="toggleEl('bt-guide')">펼치기</button>
+        </div>
+        <div class="toggle-content" id="bt-guide">
+          <table class="grade-table">
+            <thead>
+              <tr><th>지표</th><th>이번 결과</th><th>기준</th><th>평가</th></tr>
+            </thead>
+            <tbody id="bt-grade-tbody"></tbody>
+          </table>
+          <p style="font-size:.8em;color:var(--muted);margin-top:12px">
+            ※ MDD가 핵심: 총 수익이 좋아도 MDD가 크면 중간에 공포로 손절할 위험이 있습니다.<br>
+            ※ 단순 보유 비교 필수: 복잡한 전략이 아무것도 안 한 것보다 못한 경우도 많습니다.
+          </p>
+        </div>
+      </div>
+
+      <!-- 최근 10거래일 테이블 -->
+      <div class="card">
+        <div class="card-title">📋 최근 10거래일 상세 데이터</div>
+        <p style="font-size:.78em;color:var(--muted);margin-top:0">signal: 1=매수 포지션 / 0=현금 보유 | cum_returns: 1.0=원금 / 1.1=+10%</p>
+        <div style="overflow-x:auto">
+          <table class="bt-data-table">
+            <thead id="bt-table-head"></thead>
+            <tbody id="bt-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /bt-result -->
+
+  </div><!-- /tab-backtest -->
+
+  <!-- ══════════════════════════════════════════════════════════
+       Tab 5 — Settings
+  ══════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="tab-settings">
+
+    <div class="card">
+      <div class="card-title">🚀 Manual Automation Trigger</div>
+      <p style="color:var(--muted);font-size:.88em">
+        아래 버튼을 누르면 <strong>종목 갱신 → 유망 종목 분석 → 텔레그램 알림</strong> 프로세스가 백그라운드에서 실행됩니다.
+      </p>
+      <button class="btn btn-primary" onclick="runDailyUpdate()">▶ Run Full Daily Update</button>
+      <div class="status-msg" id="settings-status"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🔔 Telegram 설정 상태</div>
+      <div id="telegram-status" style="font-size:.88em;color:var(--muted)">확인 중…</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">ℹ️ 정보</div>
+      <div class="kv-row"><span class="kv-key">버전</span><span class="kv-val">v0.2.3</span></div>
+      <div class="kv-row"><span class="kv-key">API 문서</span><span class="kv-val"><a href="/docs">/docs (Swagger UI)</a></span></div>
+      <div class="kv-row"><span class="kv-key">브리핑</span><span class="kv-val"><a href="/">/ (Reveal.js 슬라이드)</a></span></div>
+    </div>
+
+  </div><!-- /tab-settings -->
+
+</div><!-- /main -->
+
+<!-- ══════════════════════════════════════════════════════════
+     종목 상세 모달
+══════════════════════════════════════════════════════════ -->
+<div id="rec-modal" class="modal-overlay hidden" onclick="closeModal(event)">
+  <div class="modal-box" id="rec-modal-box">
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<!-- Chart.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<script src="/static/js/dashboard.js"></script>
+</body>
+</html>

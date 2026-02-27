@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 import numpy as np
-from core.utils.backtester import Backtester
+from koreanstocks.core.utils.backtester import Backtester
 
 
 def _make_df(closes: list) -> pd.DataFrame:

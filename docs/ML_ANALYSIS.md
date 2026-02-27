@@ -276,14 +276,13 @@ x = latest_x_full  if scaler.n_features_in_ > 22  else latest_x
 ## 8. 재학습 방법
 
 ```bash
-# 기본 실행 (5거래일 예측, 2년 데이터, 144종목)
+# CLI 명령어 (권장)
+koreanstocks train
+koreanstocks train --future-days 5 --period 2y --test-ratio 0.2
+
+# 스크립트 직접 실행
 python train_models.py
-
-# 옵션 지정
 python train_models.py --future-days 5 --period 2y --test-ratio 0.2
-
-# 특정 종목만 지정
-python train_models.py --stocks 005930 000660 035420
 ```
 
 ### 재학습 시 주의사항

@@ -1,0 +1,20 @@
+# Include documentation and metadata
+include README.md
+include LICENSE
+include CLAUDE.md
+
+# Include static files (Reveal.js, dashboard)
+recursive-include src/koreanstocks/static *.html *.css *.js
+
+# Exclude unnecessary files
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude *.so
+global-exclude .DS_Store
+global-exclude *.bak
+
+# Exclude development and runtime artifacts
+prune tests
+prune .git
+prune data
+prune models

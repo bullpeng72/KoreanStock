@@ -9,7 +9,7 @@ on:
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -33,21 +33,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libomp-dev # XGBoost 구동을 위한 라이브러리
 
-      - name: Install Python dependencies
+      - name: Install package
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -e .
 
-      - name: Run daily update script
+      - name: Run daily analysis
         env:
-          PYTHONPATH: ${{ github.workspace }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DB_PATH: "data/storage/stock_analysis.db"
-        run: python core/engine/scheduler.py
+        run: koreanstocks recommend
 
       - name: Save DB as artifact
         if: always()

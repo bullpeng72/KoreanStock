@@ -1,7 +1,7 @@
 import requests
 import logging
 from datetime import date
-from core.config import config
+from koreanstocks.core.config import config
 import os
 
 logger = logging.getLogger(__name__)

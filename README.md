@@ -48,15 +48,16 @@
 ## 🛠 기술 스택
 
 ```
-UI          Streamlit
+UI          FastAPI + Reveal.js (일일 브리핑) + Vanilla JS (인터랙티브 대시보드)
+CLI         Typer (koreanstocks serve / recommend / analyze / train / init)
 AI/LLM      OpenAI GPT-4o-mini
 ML          Scikit-learn (Random Forest, Gradient Boosting), XGBoost
 기술 지표    ta (RSI, MACD, Bollinger Bands, SMA, OBV)
 데이터       FinanceDataReader, PyKrx (펀더멘털·수급), Naver News API
 DB          SQLite
 자동화       GitHub Actions (평일 16:30 KST), Telegram Bot API
-시각화       Plotly, Matplotlib
-언어         Python 3.11
+시각화       Plotly, Matplotlib, Chart.js (백테스트 차트)
+언어         Python 3.11 ~ 3.13
 ```
 
 ---
@@ -64,31 +65,54 @@ DB          SQLite
 ## 🏗 시스템 아키텍처
 
 ```
-Korean_Stocks/
-├── main.py                          # Streamlit 웹 대시보드 (통합 UI)
-├── core/
-│   ├── config.py                    # 환경변수 및 설정 관리 (VERSION 포함)
-│   ├── data/
-│   │   ├── provider.py              # 주가 데이터 수집 (KOSPI/KOSDAQ 시장별 필터)
-│   │   └── database.py              # SQLite 관리 (분석 결과, 워치리스트, 추천 이력)
-│   ├── engine/
-│   │   ├── indicators.py            # 기술적 지표 계산 (RSI, MACD, BB, SMA, OBV)
-│   │   ├── strategy.py              # 전략별 시그널 생성
-│   │   ├── prediction_model.py      # ML 앙상블 예측 (RF, GBR, XGB)
-│   │   ├── news_agent.py            # 뉴스 수집 + 감성 분석 (GPT-4o-mini)
-│   │   ├── analysis_agent.py        # 종목 심층 분석 오케스트레이터
-│   │   ├── recommendation_agent.py  # 유망 종목 선정 + 추천 생성
-│   │   └── scheduler.py             # 자동화 워크플로우 (Daily Task)
-│   └── utils/
-│       ├── backtester.py            # 전략 성과 검증 엔진
-│       └── notifier.py              # 텔레그램 리포트 발송
-├── models/saved/                    # 학습된 ML 모델 및 파라미터
-├── data/storage/                    # SQLite 데이터베이스 파일
-├── train_models.py                  # ML 모델 재학습 스크립트
+KoreanStocks/
+├── pyproject.toml                       # pip 빌드 설정 (koreanstocks CLI 진입점)
+├── requirements.txt                     # 개발/테스트 전용 (pytest 등)
+├── src/
+│   └── koreanstocks/
+│       ├── __init__.py                  # VERSION = "0.2.3"
+│       ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init)
+│       ├── api/
+│       │   ├── app.py                   # FastAPI 앱 팩토리, StaticFiles 마운트
+│       │   ├── dependencies.py          # 공통 의존성
+│       │   └── routers/
+│       │       ├── recommendations.py   # GET/POST /api/recommendations
+│       │       ├── analysis.py          # GET/POST /api/analysis/{code}
+│       │       ├── watchlist.py         # CRUD /api/watchlist
+│       │       ├── backtest.py          # GET /api/backtest
+│       │       └── market.py            # GET /api/market
+│       ├── static/
+│       │   ├── index.html               # Reveal.js 일일 브리핑 슬라이드
+│       │   ├── dashboard.html           # 인터랙티브 대시보드 (5탭)
+│       │   ├── js/
+│       │   │   ├── slides.js            # 슬라이드 동적 생성
+│       │   │   └── dashboard.js         # 대시보드 인터랙션
+│       │   └── css/
+│       │       └── theme.css            # 공통 스타일
+│       └── core/
+│           ├── config.py                # 환경변수 및 설정 관리 (VERSION 포함)
+│           ├── data/
+│           │   ├── provider.py          # 주가 데이터 수집 (KOSPI/KOSDAQ 필터)
+│           │   └── database.py          # SQLite 관리 (분석 결과, 워치리스트)
+│           ├── engine/
+│           │   ├── indicators.py        # 기술적 지표 계산 (RSI, MACD, BB, SMA, OBV)
+│           │   ├── strategy.py          # 전략별 시그널 생성 (TechnicalStrategy)
+│           │   ├── prediction_model.py  # ML 앙상블 예측 (RF, GBR, XGB)
+│           │   ├── news_agent.py        # 뉴스 수집 + 감성 분석 (GPT-4o-mini)
+│           │   ├── analysis_agent.py    # 종목 심층 분석 오케스트레이터
+│           │   ├── recommendation_agent.py  # 유망 종목 선정 + 추천 생성
+│           │   └── scheduler.py         # 자동화 워크플로우
+│           └── utils/
+│               ├── backtester.py        # 전략 성과 검증 엔진
+│               └── notifier.py          # 텔레그램 리포트 발송
+├── models/saved/                        # 학습된 ML 모델 및 파라미터
+├── data/storage/                        # SQLite 데이터베이스 파일
+├── train_models.py                      # ML 모델 재학습 스크립트
 ├── tests/
-│   └── test_backtester.py           # 백테스터 단위 테스트 (pytest)
+│   ├── test_backtester.py               # 백테스터 단위 테스트 (pytest)
+│   └── compat_check.py                  # Python 3.11~3.13 호환성 검증
 └── .github/workflows/
-    └── daily_analysis.yml           # GitHub Actions 자동화 스케줄러
+    └── daily_analysis.yml               # GitHub Actions 자동화 스케줄러
 ```
 
 ---
@@ -308,49 +332,64 @@ git clone https://github.com/bullpeng72/KoreanStock.git
 cd KoreanStock
 ```
 
-### 2. Python 환경 설정 (Python 3.11 권장)
+### 2. Python 환경 설정 (Python 3.11 ~ 3.13)
 ```bash
-conda create -n stocks_env python=3.11
+conda create -n stocks_env python=3.11   # 또는 3.12, 3.13
 conda activate stocks_env
 ```
 
-### 3. 의존성 설치
+### 3. 패키지 설치
 ```bash
-# XGBoost 구동에 필요한 시스템 라이브러리 (Ubuntu/Debian)
+# XGBoost 구동에 필요한 시스템 라이브러리
+# Ubuntu/Debian
 sudo apt-get install -y libomp-dev
+# macOS (conda 환경)
+conda install -c conda-forge llvm-openmp
 
-pip install -r requirements.txt
+pip install -e .
 ```
 
 ### 4. 환경 변수 설정 (`.env` 파일)
+
+`koreanstocks init` 으로 템플릿을 자동 생성할 수 있습니다:
+
+```bash
+koreanstocks init
+```
+
 ```ini
 OPENAI_API_KEY=YOUR_OPENAI_API_KEY
 TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
 TELEGRAM_CHAT_ID=YOUR_TELEGRAM_CHAT_ID
 NAVER_CLIENT_ID=YOUR_NAVER_CLIENT_ID
 NAVER_CLIENT_SECRET=YOUR_NAVER_CLIENT_SECRET
-DART_API_KEY=YOUR_DART_API_KEY
+DART_API_KEY=YOUR_DART_API_KEY      # 선택: 미설정 시 뉴스만으로 감성 분석
 DB_PATH=data/storage/stock_analysis.db
 ```
 
 | 변수 | 발급처 | 필수 여부 |
 |------|--------|---------|
-| `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) | 필수 |
-| `TELEGRAM_BOT_TOKEN` | 텔레그램 [@BotFather](https://t.me/BotFather) | 선택 |
-| `TELEGRAM_CHAT_ID` | 텔레그램 [@userinfobot](https://t.me/userinfobot) | 선택 |
-| `NAVER_CLIENT_ID/SECRET` | [developers.naver.com](https://developers.naver.com) — 검색 API 신청 | 선택 |
+| `OPENAI_API_KEY` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | 필수 |
+| `TELEGRAM_BOT_TOKEN` | 텔레그램 [@BotFather](https://t.me/BotFather) → `/newbot` | 필수 |
+| `TELEGRAM_CHAT_ID` | `api.telegram.org/bot<TOKEN>/getUpdates` 로 확인 | 필수 |
+| `NAVER_CLIENT_ID/SECRET` | [developers.naver.com](https://developers.naver.com) — 검색 API 신청 | 필수 |
 | `DART_API_KEY` | [opendart.fss.or.kr](https://opendart.fss.or.kr) — 오픈 API 신청 (무료) | 선택 |
 
 ### 5. ML 모델 학습 (최초 1회)
 ```bash
+koreanstocks train
+# 또는
 python train_models.py
 ```
 
 ### 6. 앱 실행
 ```bash
-streamlit run main.py
+koreanstocks serve
 ```
-브라우저에서 `http://localhost:8501` 접속
+브라우저가 자동으로 열리며 `http://localhost:8000/dashboard` 접속
+- `/` — Reveal.js 일일 브리핑 슬라이드
+- `/dashboard` — 인터랙티브 대시보드 (5탭)
+- `/docs` — FastAPI Swagger UI
 
 ---
 
@@ -390,13 +429,15 @@ NAVER_CLIENT_SECRET
 
 ## 📱 메뉴 구성
 
-| 메뉴 | 주요 기능 |
-|------|----------|
-| **Dashboard** | 시장 지수, 관심 종목 요약, 날짜별 AI 추천 리포트 조회 |
-| **My Watchlist** | 관심 종목 등록/삭제, 실시간 심층 분석, 분석 이력 타임라인 |
-| **AI Recommendations** | 테마·시장별 추천 생성, 당일 DB 우선 조회 (강제 재분석 옵션 별도 제공), 날짜 선택으로 히스토리 조회, 추천 지속성 히트맵 |
-| **Backtest Viewer** | RSI/MACD/COMPOSITE 전략 시뮬레이션, 단순보유(Buy&Hold) 비교 차트, 초보자 해석 가이드 |
-| **Automation & Settings** | 수동 자동화 실행, 텔레그램 설정 상태 확인 |
+| 탭 | URL | 주요 기능 |
+|----|-----|----------|
+| **Dashboard** | `/dashboard` | 시장 지수, Portfolio 요약, 날짜별 AI 추천 리포트, 추천 지속성 히트맵 |
+| **Watchlist** | `/dashboard#watchlist` | 관심 종목 등록/삭제, 실시간 심층 분석, 분석 이력 타임라인 |
+| **AI 추천** | `/dashboard#recommendations` | 테마·시장별 추천 생성, 날짜 선택 히스토리, 추천 지속성 히트맵 |
+| **백테스트** | `/dashboard#backtest` | RSI/MACD/COMPOSITE 전략 시뮬레이션, B&H 비교 차트, 초보자 해석 가이드 |
+| **설정** | `/dashboard#settings` | 수동 자동화 실행, 텔레그램 설정 상태 확인 |
+| **브리핑** | `/` | Reveal.js 일일 슬라이드 (종목별 점수·뉴스·AI 의견) |
+| **API 문서** | `/docs` | FastAPI Swagger UI |
 
 ---
 

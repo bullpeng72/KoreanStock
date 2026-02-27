@@ -4,10 +4,10 @@ from datetime import datetime
 from typing import Dict, Any, List
 import openai
 import json
-from core.config import config
-from core.data.provider import data_provider
-from core.engine.indicators import indicators
-from core.data.database import db_manager
+from koreanstocks.core.config import config
+from koreanstocks.core.data.provider import data_provider
+from koreanstocks.core.engine.indicators import indicators
+from koreanstocks.core.data.database import db_manager
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +31,12 @@ class AnalysisAgent:
         tech_score = indicators.get_composite_score(df_with_indicators)
 
         # 3. 뉴스 감성 분석 (ML 예측보다 먼저 수행하여 블렌딩에 활용)
-        from core.engine.news_agent import news_agent
+        from koreanstocks.core.engine.news_agent import news_agent
         news_res = news_agent.get_sentiment_score(name or code, stock_code=code)
         sentiment_score = news_res.get("sentiment_score", 0)
 
         # 4. ML 예측 점수 산출 (순수 ML 앙상블; sentiment 블렌딩은 composite 단계에서 일원화)
-        from core.engine.prediction_model import prediction_model
+        from koreanstocks.core.engine.prediction_model import prediction_model
         ml_res = prediction_model.predict(
             code, df,
             df_with_indicators=df_with_indicators,

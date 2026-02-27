@@ -30,12 +30,9 @@ from sklearn.metrics import mean_squared_error, r2_score
 import joblib
 import xgboost as xgb
 
-# 프로젝트 루트를 sys.path에 추가
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from core.config import config
-from core.data.provider import data_provider
-from core.engine.indicators import indicators
+from koreanstocks.core.config import config
+from koreanstocks.core.data.provider import data_provider
+from koreanstocks.core.engine.indicators import indicators
 
 logging.basicConfig(
     level=logging.INFO,

@@ -10,7 +10,7 @@ from typing import List, Dict, Any
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 import openai
-from core.config import config
+from koreanstocks.core.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class NewsAgent:
           L2 — SQLite 영속 캐시 (GitHub Actions 재실행·앱 재시작 시 GPT 비용 절감)
           당일(YYYY-MM-DD) 키가 일치할 때만 히트; 날짜가 바뀌면 자동으로 새로 수집.
         """
-        from core.data.database import db_manager
+        from koreanstocks.core.data.database import db_manager
 
         cache_key = f"{stock_name}_{date.today().isoformat()}"
 

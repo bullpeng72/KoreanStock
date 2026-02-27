@@ -4,48 +4,74 @@ KOSPI·KOSDAQ 종목을 기술적 지표, 머신러닝, 뉴스 감성 분석으�
 
 ## 아키텍처 원칙
 
-1. **Decoupling:** 비즈니스 로직(`core/`)과 UI(`main.py`)를 엄격히 분리. UI 없이도 분석 엔진이 독립 동작해야 함.
+1. **Decoupling:** 비즈니스 로직(`koreanstocks.core/`)과 API/UI를 엄격히 분리. API 서버 없이도 CLI로 분석 엔진이 독립 동작해야 함.
 2. **Validation First:** 모든 전략과 ML 모델은 백테스팅 결과를 동반해야 함.
 3. **Cost Control:** LLM(GPT-4o-mini) 호출 전 전처리로 비용 최적화. `max_tokens` 제한 필수.
 4. **Automation:** 데이터 수집·분석·알림은 GitHub Actions 스케줄러가 담당 (평일 16:30 KST). SQLite DB는 GitHub Artifact로 자동 백업 (90일 보존).
 
 ## 기술 스택
 
-- **UI:** Streamlit
+- **UI:** FastAPI + Reveal.js (일일 브리핑 슬라이드) + Vanilla JS (인터랙티브 대시보드)
+- **CLI:** Typer (`koreanstocks serve / recommend / analyze / train / init`)
 - **AI/LLM:** OpenAI GPT-4o-mini
 - **ML:** Scikit-learn (Random Forest, Gradient Boosting), XGBoost
 - **기술 지표:** `ta` 라이브러리 (RSI, MACD, Bollinger Bands, SMA, OBV)
-- **데이터:** FinanceDataReader, Naver News API
+- **데이터:** FinanceDataReader, PyKrx (펀더멘털·수급), Naver News API
 - **DB:** SQLite (`data/storage/stock_analysis.db`)
 - **자동화:** GitHub Actions, Telegram Bot API
-- **시각화:** Plotly, Matplotlib
-- **언어:** Python 3.11
+- **시각화:** Plotly, Matplotlib, Chart.js (백테스트 차트)
+- **언어:** Python 3.11 ~ 3.13
 
 ## 프로젝트 구조
 
 ```
-main.py                          # Streamlit 진입점
-core/
-├── config.py                    # 환경변수 및 설정 (dotenv), VERSION 상수
-├── data/
-│   ├── provider.py              # 주가·뉴스 데이터 수집
-│   └── database.py              # SQLite CRUD
-├── engine/
-│   ├── indicators.py            # 기술적 지표 계산 (RSI, MACD, BB 등)
-│   ├── strategy.py              # 전략별 시그널 생성
-│   ├── prediction_model.py      # ML 앙상블 예측 (RF + GBR + XGB)
-│   ├── news_agent.py            # 뉴스 수집 + GPT 감성 분석
-│   ├── analysis_agent.py        # 종목 심층 분석 오케스트레이터
-│   ├── recommendation_agent.py  # 유망 종목 선정 + 추천 생성
-│   └── scheduler.py             # 자동화 워크플로우
-└── utils/
-    ├── backtester.py            # 전략 성과 검증 엔진
-    └── notifier.py              # 텔레그램 리포트 발송
-models/saved/                    # 학습된 ML 모델 (.pkl) 및 파라미터 (.json)
-data/storage/                    # SQLite DB 파일
-train_models.py                  # ML 모델 재학습 스크립트
+pyproject.toml                       # pip 빌드 설정 (koreanstocks CLI 진입점)
+requirements.txt                     # 개발/테스트 전용 (pytest 등)
+src/
+└── koreanstocks/
+    ├── __init__.py                  # VERSION = "0.2.3"
+    ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init)
+    ├── api/
+    │   ├── app.py                   # FastAPI 앱 팩토리, StaticFiles 마운트
+    │   ├── dependencies.py          # 공통 의존성 (db_manager, analysis_agent 등)
+    │   └── routers/
+    │       ├── recommendations.py   # GET/POST /api/recommendations
+    │       ├── analysis.py          # GET/POST /api/analysis/{code}
+    │       ├── watchlist.py         # CRUD /api/watchlist
+    │       ├── backtest.py          # GET /api/backtest
+    │       └── market.py            # GET /api/market
+    ├── static/
+    │   ├── index.html               # Reveal.js 일일 브리핑 슬라이드
+    │   ├── dashboard.html           # 인터랙티브 대시보드 (5탭)
+    │   ├── js/
+    │   │   ├── slides.js            # 슬라이드 동적 생성 (API fetch)
+    │   │   └── dashboard.js         # 대시보드 인터랙션
+    │   └── css/
+    │       └── theme.css            # 공통 스타일
+    └── core/
+        ├── config.py                # 환경변수 및 설정 (dotenv), VERSION 상수
+        ├── data/
+        │   ├── provider.py          # 주가·뉴스 데이터 수집
+        │   └── database.py          # SQLite CRUD
+        ├── engine/
+        │   ├── indicators.py        # 기술적 지표 계산 (RSI, MACD, BB 등)
+        │   ├── strategy.py          # 전략별 시그널 생성 (TechnicalStrategy)
+        │   ├── prediction_model.py  # ML 앙상블 예측 (RF + GBR + XGB)
+        │   ├── news_agent.py        # 뉴스 수집 + GPT 감성 분석
+        │   ├── analysis_agent.py    # 종목 심층 분석 오케스트레이터
+        │   ├── recommendation_agent.py  # 유망 종목 선정 + 추천 생성
+        │   └── scheduler.py         # 자동화 워크플로우
+        └── utils/
+            ├── backtester.py        # 전략 성과 검증 엔진
+            └── notifier.py          # 텔레그램 리포트 발송
+models/saved/                        # 학습된 ML 모델 (.pkl) 및 파라미터 (.json)
+data/storage/                        # SQLite DB 파일
+train_models.py                      # ML 모델 재학습 스크립트
 tests/
-└── test_backtester.py           # 백테스터 단위 테스트 (pytest)
+├── test_backtester.py               # 백테스터 단위 테스트 (pytest)
+└── compat_check.py                  # Python 3.11~3.13 호환성 검증 스크립트
+.github/workflows/
+└── daily_analysis.yml               # GitHub Actions 자동화 스케줄러
 ```
 
 ## 분석 파이프라인
@@ -64,28 +90,44 @@ tests/
 ## 주요 명령어
 
 ```bash
-# 앱 실행
-streamlit run main.py
+# 패키지 설치 (편집 가능 모드)
+pip install -e .
+
+# 초기 설정 (.env 생성 + API 키 안내)
+koreanstocks init
+
+# 웹 대시보드 실행 (브라우저 자동 실행)
+koreanstocks serve                     # http://localhost:8000/dashboard
+koreanstocks serve --port 8080         # 포트 변경
+koreanstocks serve --no-browser        # 브라우저 자동 실행 비활성화
+
+# 오늘의 추천 종목 분석 (GitHub Actions용)
+koreanstocks recommend
+koreanstocks recommend --market KOSPI --limit 10
+
+# 단일 종목 심층 분석
+koreanstocks analyze 005930
 
 # ML 모델 재학습
-python train_models.py
+koreanstocks train
+python train_models.py                 # 직접 실행도 가능
 
 # 단위 테스트 실행
 pytest tests/
 
-# 의존성 설치
-pip install -r requirements.txt
+# Python 3.11~3.13 호환성 검증
+python tests/compat_check.py
 ```
 
 ## 환경 변수 (`.env`)
 
 ```ini
-OPENAI_API_KEY=...
-TELEGRAM_BOT_TOKEN=...
-TELEGRAM_CHAT_ID=...
-NAVER_CLIENT_ID=...
+OPENAI_API_KEY=...          # 필수: GPT-4o-mini (감성 분석, AI 의견 생성)
+TELEGRAM_BOT_TOKEN=...      # 필수: 추천 리포트 발송
+TELEGRAM_CHAT_ID=...        # 필수: 수신 채팅방 ID
+NAVER_CLIENT_ID=...         # 필수: 뉴스 검색 API
 NAVER_CLIENT_SECRET=...
-DART_API_KEY=...
+DART_API_KEY=...            # 선택: 금융감독원 공시 수집 (미설정 시 뉴스만 사용)
 DB_PATH=data/storage/stock_analysis.db
 ```
 
@@ -103,8 +145,8 @@ DB_PATH=data/storage/stock_analysis.db
 글로벌 `/techdebt` skill이 이 섹션을 읽어 KoreanStocks 전용 검사를 추가로 수행합니다.
 
 ### 아키텍처 경계
-- `core/` 파일에 `import streamlit` 또는 `st.` 호출이 있으면 🔴 High (UI/Core 커플링 위반)
-- `core/` 파일이 `main.py`를 직접 import하면 🔴 High
+- `src/koreanstocks/core/` 파일에 `import streamlit` 또는 `st.` 호출이 있으면 🔴 High (UI/Core 커플링 위반)
+- `src/koreanstocks/core/` 파일이 `src/koreanstocks/api/`를 직접 import하면 🔴 High (역방향 의존성 위반)
 
 ### ML 모델 무결성
 - 모델 파일(`.pkl`) 로드 시 대응 스케일러를 함께 로드하지 않으면 🔴 High

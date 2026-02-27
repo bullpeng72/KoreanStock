@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import logging
 import time
 from typing import List, Dict, Optional
-from core.config import config
+from koreanstocks.core.config import config
 
 logger = logging.getLogger(__name__)
 

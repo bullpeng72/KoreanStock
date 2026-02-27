@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from core.engine.indicators import indicators
+from koreanstocks.core.engine.indicators import indicators
 
 class TechnicalStrategy:
     """기술적 지표를 기반으로 매수/매도 시그널을 생성하는 클래스"""

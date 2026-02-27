@@ -1,10 +1,10 @@
 import logging
 import time
 from datetime import datetime
-from core.data.provider import data_provider
-from core.data.database import db_manager
-from core.engine.recommendation_agent import recommendation_agent
-from core.utils.notifier import notifier
+from koreanstocks.core.data.provider import data_provider
+from koreanstocks.core.data.database import db_manager
+from koreanstocks.core.engine.recommendation_agent import recommendation_agent
+from koreanstocks.core.utils.notifier import notifier
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

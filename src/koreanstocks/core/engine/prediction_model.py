@@ -10,9 +10,9 @@ from typing import Dict, List, Optional, Any
 import os
 import json
 
-from core.config import config
-from core.engine.indicators import indicators
-from core.data.database import db_manager
+from koreanstocks.core.config import config
+from koreanstocks.core.engine.indicators import indicators
+from koreanstocks.core.data.database import db_manager
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ class StockPredictionModel:
         시장 데이터 미수신 시 빈 DataFrame 반환 (피처 fallback 처리).
         """
         from datetime import date as _date
-        from core.data.provider import data_provider as _dp
+        from koreanstocks.core.data.provider import data_provider as _dp
         today = _date.today().isoformat()
         cached = self._market_cache.get(index_symbol, {})
         if cached.get('date') == today and not cached.get('df', pd.DataFrame()).empty:
@@ -258,7 +258,7 @@ class StockPredictionModel:
         # 종목 시장에 맞는 벤치마크 지수 선택 (KOSDAQ → KQ11, 그 외 → KS11)
         index_symbol = 'KS11'
         try:
-            from core.data.provider import data_provider as _dp
+            from koreanstocks.core.data.provider import data_provider as _dp
             stock_list = _dp.get_stock_list()
             matched = stock_list[stock_list['code'] == code]
             if not matched.empty and matched.iloc[0].get('market') == 'KOSDAQ':
