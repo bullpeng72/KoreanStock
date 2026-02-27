@@ -86,7 +86,7 @@ function stockSlide(rec) {
   const opinion  = rec.ai_opinion || {};
   const action   = opinion.action || "HOLD";
   const si       = rec.sentiment_info || {};
-  const news     = si.headlines || [];
+  const news     = si.headlines || si.articles?.slice(0,3).map(a => a.title) || [];
   const strength = opinion.strength || "";
   const weakness = opinion.weakness || "";
   const ml_score  = rec.ml_score != null ? rec.ml_score : (rec.tech_score || 0);
@@ -219,19 +219,29 @@ async function buildSlides() {
       </section>`;
   }
 
-  Reveal.initialize({
-    hash: true,
-    controls: true,
-    progress: true,
-    center: false,
-    transition: "slide",
-    backgroundTransition: "fade",
-    width: 1100,
-    height: 700,
-    margin: 0.05,
-    minScale: 0.5,
-    maxScale: 1.5,
-  });
+  // 로딩 오버레이 숨기기
+  const overlay = document.getElementById("loading-overlay");
+  if (overlay) overlay.style.display = "none";
+
+  // Reveal.js 5.x: initialize()는 최초 1회만, 이후 동적 슬라이드 추가 시 sync() 사용
+  if (Reveal.isReady()) {
+    Reveal.sync();
+    Reveal.slide(0);
+  } else {
+    await Reveal.initialize({
+      hash: true,
+      controls: true,
+      progress: true,
+      center: false,
+      transition: "slide",
+      backgroundTransition: "fade",
+      width: 1100,
+      height: 700,
+      margin: 0.05,
+      minScale: 0.5,
+      maxScale: 1.5,
+    });
+  }
 
   updateRevealTheme();
   const btn = document.getElementById("theme-toggle");
