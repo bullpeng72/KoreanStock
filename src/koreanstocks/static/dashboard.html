@@ -151,6 +151,7 @@
         <button class="btn btn-primary" onclick="runRecommendations()" style="align-self:flex-end">🔄 새로 분석 실행</button>
         <span class="status-msg" id="rec-run-status" style="align-self:flex-end"></span>
       </div>
+      <div id="rec-trading-notice"></div>
     </div>
 
     <!-- 날짜 조회 -->
@@ -182,6 +183,29 @@
       <div class="heatmap-wrap" id="rec-heatmap">
         <span style="color:var(--muted);font-size:.85em">히트맵을 불러오는 중…</span>
       </div>
+    </div>
+
+    <!-- 추천 성과 추적 -->
+    <div class="card">
+      <div class="flex-row" style="margin-bottom:8px">
+        <div class="card-title" style="margin:0">📊 추천 성과 추적</div>
+        <div class="spacer"></div>
+        <div class="theme-filter" style="margin:0" id="outcome-days-filter">
+          <button class="theme-btn" data-days="30">30일</button>
+          <button class="theme-btn active" data-days="90">90일</button>
+          <button class="theme-btn" data-days="180">180일</button>
+        </div>
+      </div>
+      <p style="color:var(--muted);font-size:.85em;margin:0 0 12px">
+        추천 후 5·10·20 거래일의 실제 주가로 AI 추천 정확도를 측정합니다.
+        BUY→수익, SELL→손실이면 정답입니다. 거래일 기준이므로 약 1주·2주·4주에 해당합니다.
+      </p>
+      <!-- 통계 요약 카드 4개 -->
+      <div id="outcome-stats" class="result-grid">
+        <span style="color:var(--muted);font-size:.85em">로딩 중…</span>
+      </div>
+      <!-- 개별 종목 성과 테이블 -->
+      <div id="outcome-list" style="margin-top:8px;overflow-x:auto"></div>
     </div>
 
   </div><!-- /tab-recommendations -->
@@ -273,10 +297,12 @@
             </thead>
             <tbody id="bt-grade-tbody"></tbody>
           </table>
-          <p style="font-size:.8em;color:var(--muted);margin-top:12px">
-            ※ MDD가 핵심: 총 수익이 좋아도 MDD가 크면 중간에 공포로 손절할 위험이 있습니다.<br>
-            ※ 단순 보유 비교 필수: 복잡한 전략이 아무것도 안 한 것보다 못한 경우도 많습니다.
-          </p>
+          <div style="font-size:.8em;color:var(--muted);margin-top:14px;display:flex;flex-direction:column;gap:6px">
+            <div>⚠️ <strong>과거 데이터 한계:</strong> 백테스트는 과거 데이터 기반 시뮬레이션으로, 미래 수익을 보장하지 않습니다. 수수료·세금·슬리피지(체결가 차이)는 반영되지 않아 실전 수익률은 낮아질 수 있습니다.</div>
+            <div>📌 <strong>기간 선택이 중요:</strong> 상승장 구간만 선택하면 모든 전략이 좋아 보입니다. 하락장·횡보장 구간을 포함한 충분한 기간(1년 이상 권장)으로 검증하세요.</div>
+            <div>📊 <strong>샤프 지수 우선:</strong> 수익률이 비슷한 전략 간 비교 시 샤프 지수가 높은 전략이 더 안정적입니다. 샤프 1.0 이상은 우수한 위험 대비 수익 효율입니다.</div>
+            <div>🛡️ <strong>MDD 실전 감각:</strong> MDD -30%는 1,000만원 투자 시 중간에 700만원까지 줄어드는 경험입니다. 이 상황에서 전략을 유지할 수 있는지 스스로 확인하세요.</div>
+          </div>
         </div>
       </div>
 
@@ -306,6 +332,7 @@
       <p style="color:var(--muted);font-size:.88em">
         아래 버튼을 누르면 <strong>종목 갱신 → 유망 종목 분석 → 텔레그램 알림</strong> 프로세스가 백그라운드에서 실행됩니다.
       </p>
+      <div id="settings-trading-notice"></div>
       <button class="btn btn-primary" onclick="runDailyUpdate()">▶ Run Full Daily Update</button>
       <div class="status-msg" id="settings-status"></div>
     </div>
@@ -317,7 +344,7 @@
 
     <div class="card">
       <div class="card-title">ℹ️ 정보</div>
-      <div class="kv-row"><span class="kv-key">버전</span><span class="kv-val">v0.2.6</span></div>
+      <div class="kv-row"><span class="kv-key">버전</span><span class="kv-val">v0.2.7</span></div>
       <div class="kv-row"><span class="kv-key">API 문서</span><span class="kv-val"><a href="/docs">/docs (Swagger UI)</a></span></div>
       <div class="kv-row"><span class="kv-key">브리핑</span><span class="kv-val"><a href="/">/ (Reveal.js 슬라이드)</a></span></div>
     </div>

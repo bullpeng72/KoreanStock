@@ -1,6 +1,6 @@
 # 📈 Korean Stocks AI/ML Analysis System
 
-![version](https://img.shields.io/badge/version-0.2.6-blue)
+![version](https://img.shields.io/badge/version-0.2.7-blue)
 
 > **KOSPI · KOSDAQ 종목을 AI와 머신러닝으로 분석하는 자동화 투자 보조 플랫폼**
 
@@ -73,7 +73,7 @@ KoreanStocks/
 ├── requirements.txt                     # 개발/테스트 전용 (pytest 등)
 ├── src/
 │   └── koreanstocks/
-│       ├── __init__.py                  # VERSION = "0.2.6"
+│       ├── __init__.py                  # VERSION = "0.2.7"
 │       ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init/sync/home)
 │       ├── api/
 │       │   ├── app.py                   # FastAPI 앱 팩토리, StaticFiles 마운트
@@ -204,9 +204,9 @@ KRX 전체 상장 종목
 | 45–65 | +30 | 상승 추세 내 최적 구간 |
 | 35–45 | +22 | 하락 완화, 반등 준비 |
 | 65–75 | +18 | 강한 상승 모멘텀 (과매수 경계) |
-| 30–35 | +12 | 과매도 근접, 주의 필요 |
+| 30–35 | +16 | 과매도 근접, 반등 기대 |
+| 30 미만 | +12 | 깊은 과매도, 반등 가능성 인정 |
 | 75 초과 | +8 | 강한 과매수 (오버히팅) |
-| 30 미만 | +4 | 깊은 과매도 (고위험) |
 
 **③ BB 위치 + 거래량 (30점)**
 
@@ -572,6 +572,9 @@ koreanstocks serve
 - `/dashboard` — 인터랙티브 대시보드 (5탭)
 - `/docs` — FastAPI Swagger UI
 
+> **권장 브라우저: Chrome / Firefox (최신 버전)**
+> 대시보드의 모든 기능은 Chrome 및 Firefox 최신 버전에서 정상 동작합니다.
+
 ---
 
 ## 🤖 자동화 설정 (GitHub Actions)
@@ -611,6 +614,8 @@ NAVER_CLIENT_SECRET
 ---
 
 ## 📱 메뉴 구성
+
+> **권장 브라우저: Chrome / Firefox (최신 버전)**
 
 | 탭 | URL | 주요 기능 |
 |----|-----|----------|

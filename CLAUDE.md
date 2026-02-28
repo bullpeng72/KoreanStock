@@ -1,4 +1,4 @@
-# Korean Stocks AI/ML Analysis System `v0.2.6`
+# Korean Stocks AI/ML Analysis System `v0.2.7`
 
 KOSPI·KOSDAQ 종목을 기술적 지표, 머신러닝, 뉴스 감성 분석으로 자동 스크리닝하고 텔레그램 리포트를 발송하는 투자 보조 플랫폼.
 
@@ -29,7 +29,7 @@ pyproject.toml                       # pip 빌드 설정 (koreanstocks CLI 진�
 requirements.txt                     # 개발/테스트 전용 (pytest 등)
 src/
 └── koreanstocks/
-    ├── __init__.py                  # VERSION = "0.2.6"
+    ├── __init__.py                  # VERSION = "0.2.7"
     ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init/sync/home)
     ├── api/
     │   ├── app.py                   # FastAPI 앱 팩토리, StaticFiles 마운트
