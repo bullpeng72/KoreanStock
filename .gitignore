@@ -40,3 +40,7 @@ htmlcov/
 models/saved/prediction_models/*.pkl
 models/saved/model_params/*.json
 
+# Runtime caches
+data/storage/pykrx_cache_*.pkl
+data/storage/dart_corp_cache.json
+
