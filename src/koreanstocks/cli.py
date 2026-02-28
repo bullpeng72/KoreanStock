@@ -236,32 +236,14 @@ def train(
     [dim]  koreanstocks train --period 1y --future-days 10[/dim]
     [dim]  koreanstocks train --test-ratio 0.3[/dim]
     """
-    import subprocess
-    import sys
-    from pathlib import Path
+    from koreanstocks.core.engine.trainer import run_training, DEFAULT_TRAINING_STOCKS
 
-    # editable install: src/koreanstocks/cli.py → 3단계 상위 = 저장소 루트
-    script = Path(__file__).parent.parent.parent / "train_models.py"
-    if not script.exists():
-        # 전역 설치(non-editable) 또는 경로 불일치 시 현재 디렉토리에서 탐색
-        script = Path.cwd() / "train_models.py"
-    if not script.exists():
-        typer.echo(
-            "train_models.py를 찾을 수 없습니다. "
-            "프로젝트 루트 디렉토리에서 실행하거나 "
-            ".env에 KOREANSTOCKS_BASE_DIR를 설정하세요.",
-            err=True,
-        )
-        raise typer.Exit(1)
-
-    cmd = [
-        sys.executable, str(script),
-        f"--period={period}",
-        f"--future-days={future_days}",
-        f"--test-ratio={test_ratio}",
-    ]
-    typer.echo(f"실행: {' '.join(cmd)}")
-    subprocess.run(cmd, check=True)
+    run_training(
+        period=period,
+        future_days=future_days,
+        stocks=DEFAULT_TRAINING_STOCKS,
+        test_ratio=test_ratio,
+    )
 
 
 @app.command()
