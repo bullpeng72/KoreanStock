@@ -15,6 +15,9 @@
 6. [점수 체계 해석](#-점수-체계-해석)
 7. [실전 투자 활용 가이드](#-실전-투자-활용-가이드)
 8. [설치 및 실행](#-설치-및-실행)
+   - [방법 A — PyPI 설치](#방법-a--pypi-설치-권장-분석-결과-조회-전용)
+   - [방법 B — 저장소 클론](#방법-b--저장소-클론-개발--자체-분석-실행)
+   - [API 키 설정](#api-키-설정--koreanstocks-init)
 9. [자동화 설정](#-자동화-설정-github-actions)
 10. [면책 조항](#-면책-조항)
 
@@ -49,7 +52,7 @@
 
 ```
 UI          FastAPI + Reveal.js (일일 브리핑) + Vanilla JS (인터랙티브 대시보드)
-CLI         Typer (koreanstocks serve / recommend / analyze / train / init / sync)
+CLI         Typer (koreanstocks serve / recommend / analyze / train / init / sync / home)
 AI/LLM      OpenAI GPT-4o-mini
 ML          Scikit-learn (Random Forest, Gradient Boosting), XGBoost
 기술 지표    ta (RSI, MACD, Bollinger Bands, SMA, OBV)
@@ -71,7 +74,7 @@ KoreanStocks/
 ├── src/
 │   └── koreanstocks/
 │       ├── __init__.py                  # VERSION = "0.2.3"
-│       ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init/sync)
+│       ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init/sync/home)
 │       ├── api/
 │       │   ├── app.py                   # FastAPI 앱 팩토리, StaticFiles 마운트
 │       │   ├── dependencies.py          # 공통 의존성
@@ -328,84 +331,242 @@ AI 추천 + 아래 조건 중 2개 이상 충족 시 매수 검토 ✅
 
 ### 방법 A — PyPI 설치 (권장: 분석 결과 조회 전용)
 
+분석 실행 없이 GitHub Actions가 생성한 추천 결과를 대시보드로 조회할 때 사용합니다.
+
+#### 사전 요구 사항 — 시스템 라이브러리
+
 ```bash
-# XGBoost 구동에 필요한 시스템 라이브러리 (Linux)
+# Ubuntu / Debian
 sudo apt-get install -y libomp-dev
 
-pip install koreanstocks
-koreanstocks init          # .env 생성 후 API 키 입력
-koreanstocks sync          # GitHub Actions 생성 DB 다운로드
-koreanstocks serve         # http://localhost:8000/dashboard
+# macOS
+brew install libomp
+
+# Windows — 별도 설치 불필요
 ```
 
-> DB는 `~/.koreanstocks/data/storage/stock_analysis.db`에 저장됩니다.
+#### pip로 설치
+
+```bash
+pip install koreanstocks
+```
+
+> 가상 환경(`venv`, `conda`) 내에서 설치할 것을 권장합니다. 시스템 Python에 직접 설치하면 다른 패키지와 의존성이 충돌할 수 있습니다.
+
+#### pipx로 설치 (CLI 툴 격리 권장)
+
+[pipx](https://pipx.pypa.io)는 CLI 도구를 독립된 가상 환경에 설치하여 시스템 Python을 오염시키지 않습니다.
+
+```bash
+# pipx 설치 (미설치 시)
+pip install pipx
+pipx ensurepath          # PATH 자동 등록 (셸 재시작 필요)
+
+# koreanstocks 설치
+pipx install koreanstocks
+```
+
+| 항목 | pip | pipx |
+|------|-----|------|
+| 설치 환경 | 현재 활성 Python 환경 | 자동 생성된 독립 venv |
+| 시스템 Python 오염 | 가능 | 없음 |
+| CLI 자동 PATH 등록 | 환경에 따라 다름 | 항상 자동 등록 |
+| 패키지 업그레이드 | `pip install -U koreanstocks` | `pipx upgrade koreanstocks` |
+| 패키지 제거 | `pip uninstall koreanstocks` | `pipx uninstall koreanstocks` |
+
+#### 설치 후 빠른 시작
+
+```bash
+koreanstocks init    # API 키 대화형 설정
+koreanstocks sync    # GitHub Actions 생성 DB 다운로드
+koreanstocks serve   # http://localhost:8000/dashboard 자동 열림
+```
+
+> `.env`·DB·ML 모델은 `~/.koreanstocks/`에 저장됩니다.
 > 매일 장 마감 후 `koreanstocks sync --force`로 최신 추천 결과를 받아오세요.
 
 ---
 
 ### 방법 B — 저장소 클론 (개발 / 자체 분석 실행)
 
+GitHub Actions 없이 로컬에서 직접 분석을 실행하거나 코드를 수정할 때 사용합니다.
+
 #### 1. 저장소 클론
+
 ```bash
 git clone https://github.com/bullpeng72/KoreanStock.git
 cd KoreanStock
 ```
 
 #### 2. Python 환경 설정 (Python 3.11 ~ 3.13)
+
 ```bash
 conda create -n stocks_env python=3.11   # 또는 3.12, 3.13
 conda activate stocks_env
 ```
 
 #### 3. 패키지 설치
+
 ```bash
 # XGBoost 구동에 필요한 시스템 라이브러리
-# Ubuntu/Debian
-sudo apt-get install -y libomp-dev
-# macOS (conda 환경)
-conda install -c conda-forge llvm-openmp
+sudo apt-get install -y libomp-dev          # Ubuntu/Debian
+# conda install -c conda-forge llvm-openmp  # macOS (conda 환경)
 
-pip install -e .
+pip install -e .    # editable 설치 — 코드 수정이 즉시 반영됨
 ```
 
-### 4. 환경 변수 설정 (`.env` 파일) — 방법 A·B 공통
+---
 
-`koreanstocks init` 으로 템플릿을 자동 생성할 수 있습니다:
+### API 키 설정 — `koreanstocks init`
+
+방법 A·B 공통. 설치 후 반드시 실행해야 합니다.
+
+#### 대화형 설정 (권장)
 
 ```bash
 koreanstocks init
 ```
 
-```ini
-OPENAI_API_KEY=YOUR_OPENAI_API_KEY
-TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
-TELEGRAM_CHAT_ID=YOUR_TELEGRAM_CHAT_ID
-NAVER_CLIENT_ID=YOUR_NAVER_CLIENT_ID
-NAVER_CLIENT_SECRET=YOUR_NAVER_CLIENT_SECRET
-DART_API_KEY=YOUR_DART_API_KEY      # 선택: 미설정 시 뉴스만으로 감성 분석
-DB_PATH=data/storage/stock_analysis.db
+실행 시 아래와 같이 단계별로 입력을 요청합니다 (Enter = 나중에 입력):
+
+```
+생성 위치: ~/.koreanstocks/.env
+
+[필수] API 키를 입력하세요 (Enter = 나중에 입력):
+
+  OpenAI API Key [https://platform.openai.com/api-keys]: sk-proj-...
+  Naver Client ID [https://developers.naver.com/apps]: abc123
+  Naver Client Secret: xyz789
+  Telegram Bot Token [@BotFather → /newbot]: 123456:ABC-...
+  Telegram Chat ID [getUpdates 로 확인]: -1001234567890
+
+[선택] 미입력 시 건너뜁니다:
+
+  DART API Key (선택) [https://opendart.fss.or.kr]:
+
+.env 파일을 생성했습니다.
+  경로: ~/.koreanstocks/.env
+
+다음 단계:
+  koreanstocks sync    # 최신 분석 DB 다운로드
+  koreanstocks serve   # 웹 대시보드 실행
 ```
 
-| 변수 | 발급처 | 필수 여부 |
-|------|--------|---------|
-| `OPENAI_API_KEY` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | 필수 |
-| `TELEGRAM_BOT_TOKEN` | 텔레그램 [@BotFather](https://t.me/BotFather) → `/newbot` | 필수 |
-| `TELEGRAM_CHAT_ID` | `api.telegram.org/bot<TOKEN>/getUpdates` 로 확인 | 필수 |
-| `NAVER_CLIENT_ID/SECRET` | [developers.naver.com](https://developers.naver.com) — 검색 API 신청 | 필수 |
-| `DART_API_KEY` | [opendart.fss.or.kr](https://opendart.fss.or.kr) — 오픈 API 신청 (무료) | 선택 |
-| `KOREANSTOCKS_GITHUB_DB_URL` | — 저장소를 fork한 경우 `koreanstocks sync` raw URL 재정의 | 선택 |
+#### 비대화형 설정 (CI·자동화용)
 
-### 5. ML 모델 학습 (방법 B / 최초 1회)
+```bash
+koreanstocks init --non-interactive   # 빈 템플릿 생성 후 직접 편집
+```
+
+#### .env 파일 경로 확인 및 편집
+
+```bash
+koreanstocks home                        # 홈 디렉토리 경로 출력
+cd $(koreanstocks home)                  # 홈 디렉토리로 이동
+${EDITOR:-nano} $(koreanstocks home)/.env  # .env 직접 편집
+
+koreanstocks home --open                 # 파일 탐색기로 열기
+koreanstocks home --setup                # 셸 alias 등록 안내 출력
+```
+
+`koreanstocks home --setup` 출력 예시 (`.bashrc` / `.zshrc`에 추가):
+
+```bash
+alias kshome='cd "$(koreanstocks home)"'          # 홈 디렉토리로 이동
+alias ksenv='${EDITOR:-nano} "$(koreanstocks home)/.env"'  # .env 편집
+```
+
+`.env` 생성 위치는 설치 방법에 따라 자동 결정됩니다:
+
+| 설치 방법 | `.env` 저장 경로 |
+|-----------|----------------|
+| `pip install koreanstocks` / `pipx install koreanstocks` | `~/.koreanstocks/.env` |
+| `pip install -e .` (editable, 방법 B) | `(프로젝트 루트)/.env` |
+
+#### API 키 발급 가이드
+
+**① OpenAI API Key** (필수) — GPT-4o-mini 뉴스 감성 분석·AI 의견 생성
+
+1. [platform.openai.com](https://platform.openai.com) 로그인
+2. 우측 상단 프로필 → **API keys** → **Create new secret key**
+3. 키 이름 입력 후 생성 — `sk-proj-...` 형식의 키를 복사
+4. ⚠️ 키는 생성 직후에만 전체 확인 가능하므로 즉시 복사하세요.
+
+**② Naver 검색 API** (필수) — 종목명 기반 최신 뉴스 수집
+
+1. [developers.naver.com/apps](https://developers.naver.com/apps) 로그인
+2. **Application 등록** 클릭
+3. 애플리케이션 이름 입력 (예: `KoreanStocks`)
+4. **사용 API** → **검색** 선택
+5. 등록 후 **Client ID**와 **Client Secret** 복사
+
+**③ Telegram Bot Token & Chat ID** (필수) — 일일 추천 리포트 수신
+
+```
+Bot Token 발급:
+1. 텔레그램에서 @BotFather 검색 후 시작
+2. /newbot 입력 → 봇 이름 및 사용자명 입력
+3. 발급된 토큰 복사 (예: 123456789:ABC-defGHI...)
+
+Chat ID 확인:
+1. 발급한 봇에게 임의 메시지 전송
+2. 브라우저에서 아래 URL 접속 (TOKEN을 실제 토큰으로 교체):
+   https://api.telegram.org/bot<TOKEN>/getUpdates
+3. 응답 JSON에서 "chat" → "id" 값 복사
+   (그룹 채팅의 경우 음수 값: 예 -1001234567890)
+```
+
+**④ DART API Key** (선택) — 금융감독원 공시 수집으로 감성 분석 품질 향상
+
+1. [opendart.fss.or.kr](https://opendart.fss.or.kr) 회원가입
+2. **개발자 센터** → **API 신청** (무료, 즉시 발급)
+3. 발급된 API 키 복사
+4. 미설정 시에도 뉴스만으로 감성 분석이 동작합니다.
+
+#### 환경 변수 전체 목록
+
+```ini
+# ── 필수 ──────────────────────────────────────────────────────
+OPENAI_API_KEY=sk-proj-...
+NAVER_CLIENT_ID=abc123
+NAVER_CLIENT_SECRET=xyz789
+TELEGRAM_BOT_TOKEN=123456789:ABC-...
+TELEGRAM_CHAT_ID=-1001234567890
+
+# ── 선택 ──────────────────────────────────────────────────────
+DART_API_KEY=                        # 미설정 시 뉴스만으로 감성 분석
+
+# ── 시스템 (기본값 그대로 사용 권장) ───────────────────────────
+DB_PATH=data/storage/stock_analysis.db
+# KOREANSTOCKS_BASE_DIR=             # 데이터 루트 경로 강제 지정 시에만 사용
+# KOREANSTOCKS_GITHUB_DB_URL=        # 저장소 fork 시 sync URL 재정의
+```
+
+| 변수 | 발급처 | 필수 |
+|------|--------|:----:|
+| `OPENAI_API_KEY` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | ✅ |
+| `NAVER_CLIENT_ID/SECRET` | [developers.naver.com](https://developers.naver.com) — 검색 API | ✅ |
+| `TELEGRAM_BOT_TOKEN` | 텔레그램 [@BotFather](https://t.me/BotFather) → `/newbot` | ✅ |
+| `TELEGRAM_CHAT_ID` | `api.telegram.org/bot<TOKEN>/getUpdates` | ✅ |
+| `DART_API_KEY` | [opendart.fss.or.kr](https://opendart.fss.or.kr) (무료) | ☑️ |
+| `KOREANSTOCKS_GITHUB_DB_URL` | 저장소 fork 시 `koreanstocks sync` 대상 URL 재정의 | ☑️ |
+
+---
+
+### ML 모델 학습 (방법 B / 최초 1회)
+
 ```bash
 koreanstocks train
 # 또는
 python train_models.py
 ```
 
-### 6. 앱 실행
+### 앱 실행
+
 ```bash
 koreanstocks serve
 ```
+
 브라우저가 자동으로 열리며 `http://localhost:8000/dashboard` 접속
 - `/` — Reveal.js 일일 브리핑 슬라이드
 - `/dashboard` — 인터랙티브 대시보드 (5탭)

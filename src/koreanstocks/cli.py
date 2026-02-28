@@ -1,6 +1,55 @@
-"""Typer CLI — koreanstocks serve / recommend / analyze / train / init"""
+"""Typer CLI — koreanstocks serve / recommend / analyze / train / init / sync / home"""
 import typer
 from typing import Optional
+
+
+def _build_env_template(keys: dict) -> str:
+    """채워진 키 값으로 .env 템플릿 문자열 생성."""
+    def v(key: str) -> str:
+        return keys.get(key, "")
+
+    return (
+        "# KoreanStocks 환경변수\n"
+        "# koreanstocks init 으로 생성됨\n"
+        "# 각 항목에 API 키를 입력한 뒤 저장하세요.\n"
+        "\n"
+        "# ── 필수 ────────────────────────────────────────────────────\n"
+        "\n"
+        "# OpenAI API 키 — GPT-4o-mini (뉴스 감성 분석, AI 의견 생성)\n"
+        "# 발급: https://platform.openai.com/api-keys\n"
+        f"OPENAI_API_KEY={v('OPENAI_API_KEY')}\n"
+        "\n"
+        "# 네이버 검색 API — 종목명 기반 최신 뉴스 수집\n"
+        "# 발급: https://developers.naver.com/apps\n"
+        f"NAVER_CLIENT_ID={v('NAVER_CLIENT_ID')}\n"
+        f"NAVER_CLIENT_SECRET={v('NAVER_CLIENT_SECRET')}\n"
+        "\n"
+        "# 텔레그램 봇 — 일일 추천 리포트 발송\n"
+        "# BOT_TOKEN: @BotFather 에서 /newbot 으로 발급\n"
+        "# CHAT_ID:   봇에게 메시지를 보낸 뒤 https://api.telegram.org/bot<TOKEN>/getUpdates 로 확인\n"
+        f"TELEGRAM_BOT_TOKEN={v('TELEGRAM_BOT_TOKEN')}\n"
+        f"TELEGRAM_CHAT_ID={v('TELEGRAM_CHAT_ID')}\n"
+        "\n"
+        "# ── 선택 ────────────────────────────────────────────────────\n"
+        "\n"
+        "# DART Open API 키 — 금융감독원 공시 수집 (설정 시 감성 분석 품질 향상)\n"
+        "# 미설정이어도 동작하며, 뉴스만으로 감성 분석을 진행합니다.\n"
+        "# 발급: https://opendart.fss.or.kr → 개발자 센터 → API 신청 (무료, 즉시 발급)\n"
+        f"DART_API_KEY={v('DART_API_KEY')}\n"
+        "\n"
+        "# ── 시스템 ───────────────────────────────────────────────────\n"
+        "\n"
+        "# SQLite DB 경로 (기본값 그대로 사용 권장)\n"
+        "DB_PATH=data/storage/stock_analysis.db\n"
+        "\n"
+        "# 프로젝트 루트 경로 (pip install -e . 로 editable 설치 시 자동 탐지됨)\n"
+        "# 전역 설치(pip install koreanstocks) 사용 시 ~/.koreanstocks/ 가 자동 사용됨\n"
+        "# 별도 경로를 지정하려면 아래 주석을 해제하고 경로를 입력\n"
+        "# KOREANSTOCKS_BASE_DIR=/path/to/data-dir\n"
+        "\n"
+        "# koreanstocks sync 다운로드 URL (저장소를 포크한 경우에만 변경)\n"
+        "# KOREANSTOCKS_GITHUB_DB_URL=https://raw.githubusercontent.com/{owner}/{repo}/main/data/storage/stock_analysis.db\n"
+    )
 
 app = typer.Typer(
     name="koreanstocks",
@@ -315,79 +364,140 @@ def sync(
 
 
 @app.command()
-def init():
+def init(
+    non_interactive: bool = typer.Option(
+        False, "--non-interactive", "-y",
+        help="대화형 입력 건너뜀 — CI·자동화 환경용 (빈 템플릿만 생성)",
+    ),
+):
     """
-    [bold]초기 설정[/bold] — .env 환경변수 템플릿 생성
+    [bold]초기 설정[/bold] — .env 환경변수 파일 대화형 생성
 
-    현재 디렉토리에 [cyan].env[/cyan] 파일을 생성합니다.
-    이미 존재하는 경우 덮어쓰지 않습니다.
+    API 키를 단계적으로 입력받아 [cyan].env[/cyan] 파일을 생성합니다.
+    [cyan]--non-interactive[/cyan] 옵션으로 빈 템플릿만 생성할 수 있습니다.
 
-    [bold]필수 항목:[/bold]
-    [dim]  OPENAI_API_KEY         — GPT-4o-mini (뉴스 감성 분석·AI 의견 생성)[/dim]
-    [dim]                           발급: https://platform.openai.com/api-keys[/dim]
-    [dim]  NAVER_CLIENT_ID/SECRET — 네이버 뉴스 검색 API (종목명 기반 최신 뉴스)[/dim]
-    [dim]                           발급: https://developers.naver.com/apps[/dim]
-    [dim]  TELEGRAM_BOT_TOKEN     — 텔레그램 봇 토큰 (추천 리포트 발송)[/dim]
-    [dim]                           발급: @BotFather → /newbot[/dim]
-    [dim]  TELEGRAM_CHAT_ID       — 텔레그램 수신 채팅방 ID[/dim]
-    [dim]                           확인: api.telegram.org/bot{TOKEN}/getUpdates[/dim]
-
-    [bold]선택 항목:[/bold]
-    [dim]  DART_API_KEY           — 금융감독원 공시 수집 (선택, 없으면 뉴스만 분석)[/dim]
-    [dim]                           발급: opendart.fss.or.kr (무료, 즉시 발급)[/dim]
-    [dim]                           미설정 시 뉴스만으로 감성 분석 진행[/dim]
+    [bold]생성 위치:[/bold]
+    [dim]  pip install -e .    →  (프로젝트루트)/.env[/dim]
+    [dim]  pip install (PyPI)  →  ~/.koreanstocks/.env[/dim]
 
     [bold]예시:[/bold]
-    [dim]  koreanstocks init     # .env 생성 후 편집기로 열어 키 입력[/dim]
+    [dim]  koreanstocks init                   # 대화형 입력[/dim]
+    [dim]  koreanstocks init --non-interactive  # 빈 템플릿만 생성 (CI용)[/dim]
     """
     from pathlib import Path
+    from koreanstocks.core.config import config
 
-    env_file = Path(".env")
+    env_file = Path(config.BASE_DIR) / ".env"
+
+    typer.echo(f"생성 위치: {env_file}")
+
     if env_file.exists():
-        typer.echo(".env 파일이 이미 존재합니다. 내용을 직접 편집하세요.")
+        if non_interactive:
+            typer.echo(".env 파일이 이미 존재합니다.")
+            typer.echo(f"  편집: ${{EDITOR:-nano}} {env_file}")
+            return
+        overwrite = typer.confirm("\n.env 파일이 이미 존재합니다. 덮어쓰겠습니까?", default=False)
+        if not overwrite:
+            typer.echo(f"취소했습니다. 기존 파일을 편집하세요: {env_file}")
+            return
+
+    keys: dict = {}
+
+    if not non_interactive:
+        _REQUIRED = [
+            ("OPENAI_API_KEY",      "OpenAI API Key",      "https://platform.openai.com/api-keys"),
+            ("NAVER_CLIENT_ID",     "Naver Client ID",     "https://developers.naver.com/apps"),
+            ("NAVER_CLIENT_SECRET", "Naver Client Secret", None),
+            ("TELEGRAM_BOT_TOKEN",  "Telegram Bot Token",  "@BotFather → /newbot"),
+            ("TELEGRAM_CHAT_ID",    "Telegram Chat ID",    "getUpdates 로 확인"),
+        ]
+        _OPTIONAL = [
+            ("DART_API_KEY", "DART API Key (선택)", "https://opendart.fss.or.kr"),
+        ]
+
+        typer.echo("\n[필수] API 키를 입력하세요 (Enter = 나중에 입력):\n")
+        for key, label, hint in _REQUIRED:
+            prompt_text = f"  {label}" + (f" [{hint}]" if hint else "")
+            keys[key] = typer.prompt(prompt_text, default="", show_default=False).strip()
+
+        typer.echo("\n[선택] 미입력 시 건너뜁니다:\n")
+        for key, label, hint in _OPTIONAL:
+            prompt_text = f"  {label}" + (f" [{hint}]" if hint else "")
+            keys[key] = typer.prompt(prompt_text, default="", show_default=False).strip()
+
+        typer.echo("")
+
+    env_file.parent.mkdir(parents=True, exist_ok=True)
+    env_file.write_text(_build_env_template(keys), encoding="utf-8")
+
+    typer.echo(f".env 파일을 생성했습니다.")
+    typer.echo(f"  경로: {env_file}")
+
+    if non_interactive:
+        typer.echo(f"  편집: ${{EDITOR:-nano}} {env_file}")
+    else:
+        _required_keys = ["OPENAI_API_KEY", "NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET",
+                          "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]
+        empty = [k for k in _required_keys if not keys.get(k)]
+        if empty:
+            typer.echo(f"\n  미입력 필수 키: {', '.join(empty)}")
+            typer.echo(f"  편집: ${{EDITOR:-nano}} {env_file}")
+
+    typer.echo("\n다음 단계:")
+    typer.echo("  koreanstocks sync    # 최신 분석 DB 다운로드")
+    typer.echo("  koreanstocks serve   # 웹 대시보드 실행")
+
+
+@app.command()
+def home(
+    open_dir: bool = typer.Option(False, "--open", "-o", help="파일 탐색기로 홈 디렉토리 열기"),
+    setup: bool = typer.Option(False, "--setup", "-s", help="셸 alias 스니펫 출력"),
+):
+    """
+    [bold]데이터 홈 디렉토리 경로 출력[/bold]
+
+    .env, DB, ML 모델이 저장된 디렉토리의 경로를 출력합니다.
+    셸에서 [cyan]cd $(koreanstocks home)[/cyan] 으로 바로 이동할 수 있습니다.
+
+    [bold]저장 파일:[/bold]
+    [dim]  .env                              — API 키 설정 파일[/dim]
+    [dim]  data/storage/stock_analysis.db   — SQLite 분석 데이터베이스[/dim]
+    [dim]  models/saved/                    — 학습된 ML 모델 (.pkl)[/dim]
+
+    [bold]예시:[/bold]
+    [dim]  cd $(koreanstocks home)           # 홈 디렉토리로 이동[/dim]
+    [dim]  koreanstocks home --open          # 파일 탐색기로 열기[/dim]
+    [dim]  koreanstocks home --setup         # 셸 alias 설정 안내 출력[/dim]
+    """
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    from koreanstocks.core.config import config
+
+    base = Path(config.BASE_DIR)
+
+    if open_dir:
+        try:
+            if sys.platform == "darwin":
+                subprocess.run(["open", str(base)], check=True)
+            elif sys.platform == "win32":
+                subprocess.run(["explorer", str(base)], check=True)
+            else:
+                subprocess.run(["xdg-open", str(base)], check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            typer.echo(f"파일 탐색기를 열 수 없습니다: {e}", err=True)
+            typer.echo(f"경로: {base}")
         return
 
-    template = (
-        "# KoreanStocks 환경변수\n"
-        "# koreanstocks init 으로 생성됨\n"
-        "# 각 항목에 API 키를 입력한 뒤 저장하세요.\n"
-        "\n"
-        "# ── 필수 ────────────────────────────────────────────────────\n"
-        "\n"
-        "# OpenAI API 키 — GPT-4o-mini (뉴스 감성 분석, AI 의견 생성)\n"
-        "# 발급: https://platform.openai.com/api-keys\n"
-        "OPENAI_API_KEY=\n"
-        "\n"
-        "# 네이버 검색 API — 종목명 기반 최신 뉴스 수집\n"
-        "# 발급: https://developers.naver.com/apps\n"
-        "NAVER_CLIENT_ID=\n"
-        "NAVER_CLIENT_SECRET=\n"
-        "\n"
-        "# 텔레그램 봇 — 일일 추천 리포트 발송\n"
-        "# BOT_TOKEN: @BotFather 에서 /newbot 으로 발급\n"
-        "# CHAT_ID:   봇에게 메시지를 보낸 뒤 https://api.telegram.org/bot<TOKEN>/getUpdates 로 확인\n"
-        "TELEGRAM_BOT_TOKEN=\n"
-        "TELEGRAM_CHAT_ID=\n"
-        "\n"
-        "# ── 선택 ────────────────────────────────────────────────────\n"
-        "\n"
-        "# DART Open API 키 — 금융감독원 공시 수집 (설정 시 감성 분석 품질 향상)\n"
-        "# 미설정이어도 동작하며, 뉴스만으로 감성 분석을 진행합니다.\n"
-        "# 발급: https://opendart.fss.or.kr → 개발자 센터 → API 신청 (무료, 즉시 발급)\n"
-        "DART_API_KEY=\n"
-        "\n"
-        "# ── 시스템 ───────────────────────────────────────────────────\n"
-        "\n"
-        "# SQLite DB 경로 (기본값 그대로 사용 권장)\n"
-        "DB_PATH=data/storage/stock_analysis.db\n"
-        "\n"
-        "# 프로젝트 루트 경로 (pip install -e . 로 editable 설치 시 자동 탐지됨)\n"
-        "# 전역 설치(pip install koreanstocks) 사용 시 ~/.koreanstocks/ 가 자동 사용됨\n"
-        "# 별도 경로를 지정하려면 아래 주석을 해제하고 경로를 입력\n"
-        "# KOREANSTOCKS_BASE_DIR=/path/to/data-dir\n"
-        "\n"
-        "# koreanstocks sync 다운로드 URL (저장소를 포크한 경우에만 변경)\n"
-        "# KOREANSTOCKS_GITHUB_DB_URL=https://raw.githubusercontent.com/{owner}/{repo}/main/data/storage/stock_analysis.db\n"
-    )
-    env_file.write_text(template, encoding="utf-8")
-    typer.echo(".env 파일을 생성했습니다. API 키를 입력한 뒤 저장하세요.")
+    if setup:
+        shell = os.environ.get("SHELL", "")
+        rc_file = "~/.zshrc" if "zsh" in shell else "~/.bashrc"
+        typer.echo(f"# 아래 내용을 {rc_file} 에 추가하세요:\n")
+        typer.echo('alias kshome=\'cd "$(koreanstocks home)"\'')
+        typer.echo('alias ksenv=\'${EDITOR:-nano} "$(koreanstocks home)/.env"\'')
+        typer.echo(f"\n# 적용: source {rc_file}")
+        return
+
+    # 기본: 경로만 출력 (cd $(koreanstocks home) 에서 사용)
+    typer.echo(str(base))

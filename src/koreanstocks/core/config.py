@@ -1,7 +1,6 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
-
-load_dotenv()
 
 
 def _resolve_base_dir() -> str:
@@ -29,14 +28,27 @@ def _resolve_base_dir() -> str:
     return home_base
 
 
+# Step 1: CWD 기준 .env 로드 (editable install / 기존 워크플로 호환)
+load_dotenv()
+
+# Step 2: BASE_DIR 결정 (위에서 로드한 KOREANSTOCKS_BASE_DIR 반영)
+_BASE_DIR = _resolve_base_dir()
+
+# Step 3: BASE_DIR/.env 추가 로드 (PyPI 전역설치, koreanstocks init이 BASE_DIR에 생성한 .env)
+#         override=False → 시스템 환경변수 및 CWD .env 값을 덮어쓰지 않음
+_env_in_base = Path(_BASE_DIR) / ".env"
+if _env_in_base.exists():
+    load_dotenv(dotenv_path=_env_in_base, override=False)
+
+
 class Config:
     # Version
     VERSION = "0.2.3"
 
-    # Project Root
+    # Project Root — Step 2에서 결정된 _BASE_DIR 재사용 (중복 호출 방지)
     # - editable install (pip install -e .): __file__ 기준 자동 탐지
     # - 전역 설치 또는 경로 오류 시: .env에 KOREANSTOCKS_BASE_DIR=/path/to/project 설정
-    BASE_DIR = _resolve_base_dir()
+    BASE_DIR = _BASE_DIR
 
     # API Keys
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")

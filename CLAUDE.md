@@ -12,7 +12,7 @@ KOSPI·KOSDAQ 종목을 기술적 지표, 머신러닝, 뉴스 감성 분석으�
 ## 기술 스택
 
 - **UI:** FastAPI + Reveal.js (일일 브리핑 슬라이드) + Vanilla JS (인터랙티브 대시보드)
-- **CLI:** Typer (`koreanstocks serve / recommend / analyze / train / init / sync`)
+- **CLI:** Typer (`koreanstocks serve / recommend / analyze / train / init / sync / home`)
 - **AI/LLM:** OpenAI GPT-4o-mini
 - **ML:** Scikit-learn (Random Forest, Gradient Boosting), XGBoost
 - **기술 지표:** `ta` 라이브러리 (RSI, MACD, Bollinger Bands, SMA, OBV)
@@ -30,7 +30,7 @@ requirements.txt                     # 개발/테스트 전용 (pytest 등)
 src/
 └── koreanstocks/
     ├── __init__.py                  # VERSION = "0.2.3"
-    ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init/sync)
+    ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init/sync/home)
     ├── api/
     │   ├── app.py                   # FastAPI 앱 팩토리, StaticFiles 마운트
     │   ├── dependencies.py          # 공통 의존성 (db_manager, analysis_agent 등)
@@ -94,8 +94,14 @@ tests/
 pip install -e .              # 개발 / git clone 환경 (editable)
 pip install koreanstocks      # PyPI 전역 설치 (DB는 ~/.koreanstocks/ 에 생성)
 
-# 초기 설정 (.env 생성 + API 키 안내)
-koreanstocks init
+# 초기 설정 (.env 대화형 생성 — API 키를 프롬프트로 입력)
+koreanstocks init                   # 대화형 입력
+koreanstocks init --non-interactive  # 빈 템플릿만 생성 (CI용)
+
+# 데이터 홈 디렉토리 (.env, DB, 모델 저장 위치)
+koreanstocks home                   # 경로 출력 (cd $(koreanstocks home) 로 이동)
+koreanstocks home --open            # 파일 탐색기로 열기
+koreanstocks home --setup           # 셸 alias 스니펫 출력 (~/.bashrc / ~/.zshrc)
 
 # GitHub Actions 생성 DB 다운로드 (PyPI 설치 후 추천 데이터 즉시 사용 가능)
 koreanstocks sync              # 최초 수신 또는 날짜 갱신
