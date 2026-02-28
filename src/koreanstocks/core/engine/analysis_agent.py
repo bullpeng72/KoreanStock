@@ -1,8 +1,10 @@
+import time
 import pandas as pd
 import logging
 from datetime import datetime
 from typing import Dict, Any, List
 import openai
+from openai import RateLimitError as _OpenAIRateLimitError
 import json
 from koreanstocks.core.config import config
 from koreanstocks.core.data.provider import data_provider
@@ -49,20 +51,23 @@ class AnalysisAgent:
         _sentiment_norm_ref = max(0.0, min(100.0, (sentiment_score + 100.0) / 2.0))
         ml_blended = round(0.65 * ml_raw_score + 0.35 * _sentiment_norm_ref, 2)
 
-        # 5. AI 분석 (최근 데이터 + 순수 ML 점수 + 뉴스 점수 기반)
-        current_price = float(df_with_indicators.iloc[-1]['close'])
-        ai_opinion = self._get_ai_opinion(name or code, df_with_indicators.tail(30), tech_score, ml_raw_score, news_res, current_price)
-        
-        # 6. 결과 정리
-        latest = df_with_indicators.iloc[-1]
-
-        # 시장 구분·섹터 정보 (stock_list 캐시에서 조회)
+        # 5. 시장/섹터 정보 및 지수 수집 (AI 분석 컨텍스트용)
         stock_list = data_provider.get_stock_list()
         _row = stock_list[stock_list['code'] == code] if 'code' in stock_list.columns else stock_list.iloc[0:0]
-        market_val   = str(_row.iloc[0]['market'])   if not _row.empty else ''
+        market_val   = str(_row.iloc[0]['market'])                 if not _row.empty else ''
         sector_val   = str(_row.iloc[0].get('sector',   '') or '') if not _row.empty else ''
         industry_val = str(_row.iloc[0].get('industry', '') or '') if not _row.empty else ''
+        market_indices = data_provider.get_market_indices()
 
+        # 6. AI 분석 (최근 데이터 + 순수 ML 점수 + 뉴스 점수 + 시장/섹터 맥락)
+        current_price = float(df_with_indicators.iloc[-1]['close'])
+        ai_opinion = self._get_ai_opinion(
+            name or code, df_with_indicators.tail(30), tech_score, ml_raw_score, news_res, current_price,
+            market=market_val, sector=sector_val, market_indices=market_indices,
+        )
+
+        # 7. 결과 정리
+        latest = df_with_indicators.iloc[-1]
         analysis_res = {
             "code": code,
             "name": name,
@@ -94,7 +99,7 @@ class AnalysisAgent:
             "analysis_date": datetime.now().strftime('%Y-%m-%d %H:%M')
         }
 
-        # 7. 분석 이력 저장
+        # 8. 분석 이력 저장
         try:
             db_manager.save_analysis_history(analysis_res)
         except Exception as e:
@@ -102,8 +107,10 @@ class AnalysisAgent:
 
         return analysis_res
 
-    def _get_ai_opinion(self, name: str, recent_df: pd.DataFrame, tech_score: float, ml_score: float, news_res: Dict, current_price: float = 0.0) -> Dict[str, Any]:
-        """GPT-4o-mini를 사용한 정성적 분석 (ML 및 뉴스 감성 반영)"""
+    def _get_ai_opinion(self, name: str, recent_df: pd.DataFrame, tech_score: float, ml_score: float,
+                        news_res: Dict, current_price: float = 0.0,
+                        market: str = '', sector: str = '', market_indices: Dict = None) -> Dict[str, Any]:
+        """GPT-4o-mini를 사용한 정성적 분석 (ML·뉴스 감성·시장/섹터 맥락 반영)"""
         try:
             # 최근 가격 흐름 요약 (종가, 거래량, 주요 지표 포함)
             indicator_cols = ['close', 'volume', 'rsi', 'macd', 'macd_signal', 'bb_low', 'bb_high']
@@ -117,6 +124,21 @@ class AnalysisAgent:
             macd_direction = "골든크로스(상승)" if (macd_val != 'N/A' and macd_sig_val != 'N/A' and macd_val > macd_sig_val) else "데드크로스(하락)"
             bb_pos = round(float((latest['close'] - latest['bb_low']) / (latest['bb_high'] - latest['bb_low'])), 2) if ('bb_high' in latest and (latest['bb_high'] - latest['bb_low']) != 0) else 'N/A'
 
+            # 시장/섹터 맥락 문자열 구성
+            mkt_lines = []
+            if market or sector:
+                parts = [f"소속 시장: {market}" if market else '', f"섹터: {sector}" if sector else '']
+                mkt_lines.append(' | '.join(p for p in parts if p))
+            if market_indices:
+                for key, label in [('KOSPI', 'KOSPI 지수'), ('KOSDAQ', 'KOSDAQ 지수'), ('USD_KRW', 'USD/KRW 환율')]:
+                    val = market_indices.get(key)
+                    chg = market_indices.get(f"{key}_change")
+                    if val is not None:
+                        chg_str = f" (전일 대비 {chg:+.2f}%)" if chg is not None else ''
+                        unit = '원' if key == 'USD_KRW' else ''
+                        mkt_lines.append(f"{label}: {val:,.2f}{unit}{chg_str}")
+            market_context = '\n            '.join(f"- {l}" for l in mkt_lines) if mkt_lines else '- (정보 없음)'
+
             prompt = f"""
             주식 종목 '{name}'에 대한 데이터와 뉴스 심리를 바탕으로 심층 분석해줘.
 
@@ -124,6 +146,9 @@ class AnalysisAgent:
             - 기술적 점수: 0~39 약세, 40~59 중립, 60~79 강세, 80~100 매우 강세
             - ML 점수: 향후 5거래일 크로스섹셔널 순위 예측 (0=전체 최하위 상대강도, 50=평균, 100=전체 최상위)
             - 뉴스 감성: -100~-50 매우 부정, -49~-1 부정, 0 중립, 1~50 긍정, 51~100 매우 긍정
+
+            [시장/섹터 맥락]
+            {market_context}
 
             [정량 점수]
             - 기술적 지표 종합 점수: {tech_score}/100
@@ -155,17 +180,30 @@ class AnalysisAgent:
             }}
             """
 
-            response = self.client.chat.completions.create(
-                model=config.DEFAULT_MODEL,
-                messages=[
-                    {"role": "system", "content": "당신은 한국 주식 시장 전문 퀀트 애널리스트입니다. 제공된 정량 데이터에 근거하여 객관적이고 일관된 투자 분석을 JSON 형식으로만 제공합니다."},
-                    {"role": "user", "content": prompt},
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.3,
-                max_tokens=600,
-            )
-            result = json.loads(response.choices[0].message.content)
+            for _attempt in range(3):
+                try:
+                    response = self.client.chat.completions.create(
+                        model=config.DEFAULT_MODEL,
+                        messages=[
+                            {"role": "system", "content": "당신은 한국 주식 시장 전문 퀀트 애널리스트입니다. 제공된 정량 데이터에 근거하여 객관적이고 일관된 투자 분석을 JSON 형식으로만 제공합니다."},
+                            {"role": "user", "content": prompt},
+                        ],
+                        response_format={"type": "json_object"},
+                        temperature=0.3,
+                        max_tokens=600,
+                    )
+                    result = json.loads(response.choices[0].message.content)
+                    break
+                except _OpenAIRateLimitError:
+                    if _attempt < 2:
+                        wait = 10 * (2 ** _attempt)  # 10s → 20s
+                        logger.warning(f"[{name}] GPT Rate limit, {wait}초 후 재시도 ({_attempt + 1}/3)")
+                        time.sleep(wait)
+                    else:
+                        logger.error(f"[{name}] GPT Rate limit: 재시도 한도 초과")
+                        return {"summary": "AI 분석 실패 (Rate limit)", "action": "N/A", "target_price": 0}
+            else:
+                return {"summary": "AI 분석 실패", "action": "N/A", "target_price": 0}
 
             # 데이터 정제: target_price를 숫자로 변환
             if 'target_price' in result:
@@ -180,15 +218,12 @@ class AnalysisAgent:
                 tp = result['target_price']
                 action = result.get('action', 'HOLD')
                 if action == 'BUY' and tp < current_price * 0.98:
-                    # 매수 의견인데 목표가가 현재가 대비 2% 이상 낮음 → 3% 상향 조정
                     result['target_price'] = int(current_price * 1.03)
                     logger.warning(f"[{name}] BUY but target_price below current. Auto-adjusted to {result['target_price']}")
                 elif action == 'HOLD' and tp < current_price * 0.92:
-                    # HOLD인데 목표가가 현재가 대비 8% 이상 하락 → SELL로 변경 (기존 3% → 8%)
                     result['action'] = 'SELL'
                     logger.warning(f"[{name}] HOLD but target_price significantly below current. Changed action to SELL.")
                 elif action == 'SELL' and tp > current_price * 1.02:
-                    # 매도 의견인데 목표가가 현재가 대비 2% 이상 높음 → 3% 하향 조정
                     result['target_price'] = int(current_price * 0.97)
                     logger.warning(f"[{name}] SELL but target_price above current. Auto-adjusted to {result['target_price']}")
 

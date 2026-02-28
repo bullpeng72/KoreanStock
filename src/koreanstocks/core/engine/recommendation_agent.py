@@ -11,6 +11,39 @@ from koreanstocks.core.data.database import db_manager
 logger = logging.getLogger(__name__)
 
 
+def _apply_sector_diversity(results: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+    """섹터 다양성을 보장하며 상위 종목 선정.
+
+    섹터당 최대 max_per_sector개로 제한하여 편중 방지.
+    섹터 정보가 없는 종목은 제한 없이 통과.
+    선택 후 limit에 미달하면 한도 초과 종목을 점수순으로 보충.
+    """
+    max_per_sector = max(1, round(limit / 3))  # 섹터당 상한 ~33%
+    sector_count: Dict[str, int] = {}
+    selected: List[Dict[str, Any]] = []
+    deferred: List[Dict[str, Any]] = []  # 섹터 한도 초과 종목 (보충용)
+
+    for rec in results:  # composite_score 내림차순 정렬 상태
+        sector = (rec.get('sector') or '').strip()
+        if not sector:
+            # 섹터 미분류 — 한도 적용 없이 선택
+            selected.append(rec)
+        elif sector_count.get(sector, 0) < max_per_sector:
+            selected.append(rec)
+            sector_count[sector] = sector_count.get(sector, 0) + 1
+        else:
+            deferred.append(rec)
+
+        if len(selected) >= limit:
+            break
+
+    # 섹터 다양화 후 부족분은 점수순 보충
+    if len(selected) < limit:
+        selected.extend(deferred[:limit - len(selected)])
+
+    return selected[:limit]
+
+
 def _composite_score(x: Dict[str, Any]) -> float:
     """3-way 가중합 composite 점수 산출.
 
@@ -51,7 +84,7 @@ class RecommendationAgent:
             candidate_codes += [c for c in theme_df['code'].tolist() if c not in set(candidate_codes)]
         else:
             # get_market_ranking() 내부에서 market 필터 적용 — 별도 post-filter 불필요
-            candidate_codes = data_provider.get_market_ranking(limit=100, market=market)
+            candidate_codes = data_provider.get_market_ranking(limit=200, market=market)
 
         if not candidate_codes:
             return []
@@ -59,12 +92,24 @@ class RecommendationAgent:
         # 2. 종목명 매칭을 위한 전체 리스트 확보
         stock_list = data_provider.get_stock_list()
 
-        # 3. 선별된 후보군 분석 (최대 30개 종목, 병렬 실행)
-        target_codes = candidate_codes[:30]
+        # FDR stock_list 실패 대비 PyKrx 폴백 준비 (루프 밖에서 1회 import)
+        try:
+            from pykrx import stock as _pykrx
+        except ImportError:
+            _pykrx = None
+
+        # 3. 선별된 후보군 분석 (limit 기반 동적 산정, 최대 60개, 병렬 실행)
+        analysis_pool = min(limit * 6, 60)
+        target_codes = candidate_codes[:analysis_pool]
         candidates = []
         for code in target_codes:
             stock_info = stock_list[stock_list['code'] == code]
-            nm = stock_info.iloc[0]['name'] if not stock_info.empty else code
+            if not stock_info.empty:
+                nm = stock_info.iloc[0]['name']
+            elif _pykrx is not None:
+                nm = _pykrx.get_market_ticker_name(code) or code
+            else:
+                nm = code
             candidates.append((code, nm))
 
         results = []
@@ -89,16 +134,13 @@ class RecommendationAgent:
         # 4. composite 점수로 정렬
         results.sort(key=_composite_score, reverse=True)
 
-        # 5. DB에 추천 결과 저장 (theme_label / market 메타 포함)
-        final_recs = results[:limit]
+        # 5. 섹터 다양성 보장 후 최종 선정
+        final_recs = _apply_sector_diversity(results, limit)
         for rec in final_recs:
             rec['theme'] = theme_label
             rec['analysis_market'] = market
-        self._save_to_db(final_recs)
-
-        # 6. composite_score를 rec dict에 추가 (알림 표시용)
-        for rec in final_recs:
             rec['composite_score'] = round(_composite_score(rec), 2)
+        self._save_to_db(final_recs)
 
         return final_recs
 

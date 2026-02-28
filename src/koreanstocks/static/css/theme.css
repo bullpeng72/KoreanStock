@@ -415,8 +415,8 @@ select option { background: var(--bg-dark); }
   border-bottom: 1px solid var(--border);
   text-align: right;
 }
-.bt-data-table th { text-align: left; color: var(--muted); }
-.bt-data-table td:first-child { text-align: left; }
+.bt-data-table th { color: var(--muted); }
+.bt-data-table th:first-child, .bt-data-table td:first-child { text-align: left; }
 
 /* ── 모달 ─────────────────────────────────────── */
 .modal-overlay {

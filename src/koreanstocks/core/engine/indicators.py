@@ -100,15 +100,16 @@ class IndicatorCalculator:
             if latest['macd'] > latest['macd_signal']: trend_score += 20  # sma_60 없으면 MACD 집중
 
         # ── 2. 모멘텀 점수 (30pt max) ───────────────────────────────
-        # RSI: 상승 추세 내 적정 구간(45~65) 최고점
+        # RSI 구간별 점수 (추세 추종 최고점, 과매도 > 과매수로 설계)
+        # 과매도(RSI<30)는 반등 가능성 인정; 낙하 여부는 추세·BB 점수가 추가 하향 조정함
         mom_score = 0
         rsi = latest['rsi']
         if 45 <= rsi <= 65:    mom_score += 30  # 상승 추세 내 적정 구간 (최적)
-        elif 35 <= rsi < 45:   mom_score += 22  # 하락 완화, 반등 준비 구간
-        elif 65 < rsi <= 75:   mom_score += 18  # 강한 상승 모멘텀 (과매수 경계)
-        elif 30 <= rsi < 35:   mom_score += 12  # 과매도 근접, 주의 필요
-        elif rsi > 75:         mom_score += 8   # 강한 과매수 (오버히팅)
-        else:                  mom_score += 4   # RSI < 30: 깊은 과매도 (고위험)
+        elif 35 <= rsi < 45:   mom_score += 22  # 하락 완화, 반등 준비
+        elif 65 < rsi <= 75:   mom_score += 18  # 강한 상승 (과매수 경계)
+        elif 30 <= rsi < 35:   mom_score += 16  # 과매도 근접, 반등 기대
+        elif rsi < 30:         mom_score += 12  # 깊은 과매도, 반등 가능성 인정
+        else:                  mom_score += 8   # RSI > 75: 과매수 (오버히팅)
 
         # ── 3. 가격 위치 + 거래량 확인 (30pt max) ───────────────────
         vol_score = 0

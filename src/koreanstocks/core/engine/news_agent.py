@@ -1,6 +1,7 @@
 import io
 import math
 import re
+import time
 import zipfile
 import requests
 import logging
@@ -10,6 +11,7 @@ from typing import List, Dict, Any
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 import openai
+from openai import RateLimitError as _OpenAIRateLimitError
 from koreanstocks.core.config import config
 
 logger = logging.getLogger(__name__)
@@ -74,9 +76,9 @@ class NewsAgent:
             return []
 
         # " 주가" 추가로 검색 정확도 향상 (동명 계열사 뉴스 혼입 방지)
-        # display=30: 중복 제거 후 충분한 기사 확보를 위해 2배 수집
+        # display=50: 계열사 필터·중복 제거 후에도 충분한 기사 수 확보
         query = f"{stock_name} 주가"
-        url = f"https://openapi.naver.com/v1/search/news.json?query={query}&display=30&sort=date"
+        url = f"https://openapi.naver.com/v1/search/news.json?query={query}&display=50&sort=date"
         headers = {
             "X-Naver-Client-Id": self.naver_client_id,
             "X-Naver-Client-Secret": self.naver_client_secret,
@@ -163,7 +165,7 @@ class NewsAgent:
             연합뉴스발 기사를 수십 개 매체가 동시에 게재하는 패턴을 걸러낸다.
 
         2단계 — 제목 유사도 중복 제거:
-            한글·영문 토큰 Jaccard 유사도 > 0.6이면 같은 내용으로 판단하고 제거.
+            한글·영문 토큰 Jaccard 유사도 > 0.75이면 같은 내용으로 판단하고 제거.
             도메인이 달라도 사실상 동일한 기사를 걸러낸다.
         """
         # 1단계: 도메인 중복 제거 (API는 최신순이므로 첫 번째 = 가장 최신)
@@ -190,7 +192,7 @@ class NewsAgent:
         for item in domain_deduped:
             tokens = tokenize(item['title'])
             is_dup = any(
-                len(tokens & seen) / len(tokens | seen) > 0.6
+                len(tokens & seen) / len(tokens | seen) > 0.75
                 for seen in seen_token_sets
                 if tokens and seen
             )
@@ -205,10 +207,28 @@ class NewsAgent:
     def _load_dart_corp_map(self) -> None:
         """DART corpCode.xml ZIP을 다운로드하여 stock_code → corp_code 전체 매핑을 캐시에 로드.
 
-        DART Open API: GET /api/corpCode.xml  (ZIP, 전체 기업 목록)
-        한 번만 호출되며 이후 _dart_corp_cache 딕셔너리를 재사용.
-        _dart_corp_cache['__loaded__'] 키로 로드 여부를 추적한다.
+        디스크 캐시 우선 조회 ({BASE_DIR}/data/storage/dart_corp_cache.json, 당일 유효):
+          - 당일 캐시 파일이 있으면 API 재호출 없이 즉시 로드 (~2 MB ZIP 다운로드 생략)
+          - 없거나 날짜가 다르면 DART API에서 새로 다운로드 후 캐시 파일 갱신
         """
+        from pathlib import Path
+        cache_path = Path(config.BASE_DIR) / "data" / "storage" / "dart_corp_cache.json"
+        today = date.today().isoformat()
+
+        # ── 디스크 캐시 확인 ──────────────────────────────────────────
+        if cache_path.exists():
+            try:
+                with open(cache_path, 'r', encoding='utf-8') as f:
+                    cached = json.load(f)
+                if cached.get('date') == today:
+                    self._dart_corp_cache.update(cached.get('data', {}))
+                    self._dart_corp_cache["__loaded__"] = "__loaded__"
+                    logger.info(f"[DART] corpCode 캐시 로드 (디스크): {len(self._dart_corp_cache) - 1}개 기업")
+                    return
+            except Exception as e:
+                logger.debug(f"[DART] 디스크 캐시 읽기 실패: {e}")
+
+        # ── DART API 다운로드 ─────────────────────────────────────────
         try:
             resp = requests.get(
                 "https://opendart.fss.or.kr/api/corpCode.xml",
@@ -221,13 +241,24 @@ class NewsAgent:
             with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
                 xml_bytes = zf.read("CORPCODE.xml")
             root = ElementTree.fromstring(xml_bytes)
+            corp_map: Dict[str, str] = {}
             for item in root.findall("list"):
                 sc = (item.findtext("stock_code") or "").strip()
                 cc = (item.findtext("corp_code") or "").strip()
                 if sc:
-                    self._dart_corp_cache[sc] = cc
+                    corp_map[sc] = cc
+            self._dart_corp_cache.update(corp_map)
             self._dart_corp_cache["__loaded__"] = "__loaded__"
-            logger.info(f"[DART] corpCode 매핑 로드 완료: {len(self._dart_corp_cache) - 1}개 기업")
+            logger.info(f"[DART] corpCode 매핑 로드 완료: {len(corp_map)}개 기업")
+
+            # ── 디스크 캐시 저장 (다음 서버 시작 시 재사용) ──────────
+            try:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(cache_path, 'w', encoding='utf-8') as f:
+                    json.dump({'date': today, 'data': corp_map}, f, ensure_ascii=False)
+                logger.debug(f"[DART] corpCode 캐시 저장: {cache_path}")
+            except Exception as e:
+                logger.debug(f"[DART] 디스크 캐시 저장 실패: {e}")
         except Exception as e:
             logger.warning(f"[DART] corpCode.xml 파싱 실패: {e}")
 
@@ -339,7 +370,7 @@ class NewsAgent:
         """GPT-4o-mini를 사용하여 뉴스 + DART 공시의 투자 심리 분석.
 
         - 뉴스: 지수 감쇠 시간 가중치 (Python 계산 → GPT에 수치 전달)
-        - DART 공시: 공식 공시 섹션으로 분리 — 뉴스보다 높은 신뢰도 명시
+        - DART 공시: 뉴스와 동일한 시간 가중치 적용 + 신뢰도 높음 명시
         - temperature=0.1 으로 응답 일관성 확보
         """
         # 뉴스 섹션: 시간 가중치 수치 포함
@@ -351,13 +382,22 @@ class NewsAgent:
             news_lines.append(f"- [가중치 {weight:.2f} / {age_label}] {item['title']}")
         news_section = "\n".join(news_lines) if news_lines else "- (없음)"
 
-        # DART 공시 섹션
+        # DART 공시 섹션: 뉴스와 동일한 시간 가중치 적용
         dart_lines = []
         for d in (dart_items or []):
-            date_fmt = d.get('date', '')
-            if len(date_fmt) == 8:
-                date_fmt = f"{date_fmt[:4]}-{date_fmt[4:6]}-{date_fmt[6:]}"
-            dart_lines.append(f"- [{d.get('category', '')} / {date_fmt}] {d['title']}")
+            date_str = d.get('date', '')
+            date_fmt = date_str
+            if len(date_str) == 8:
+                date_fmt = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+                try:
+                    dart_dt = datetime.strptime(date_str, "%Y%m%d")
+                    days = max((datetime.now() - dart_dt).days, 0)
+                except Exception:
+                    days = 7
+            else:
+                days = 7
+            weight = self._time_weight(days)
+            dart_lines.append(f"- [가중치 {weight:.2f} / {d.get('category', '')} / {date_fmt}] {d['title']}")
         dart_section = "\n".join(dart_lines) if dart_lines else "- (없음)"
 
         dart_instruction = (
@@ -369,7 +409,7 @@ class NewsAgent:
 
         prompt = f"""
         다음은 주식 종목 '{stock_name}'에 대한 최신 정보입니다.
-        뉴스에는 시간 가중치(오늘=1.00, 오래될수록 감소)가 표시되어 있습니다.
+        뉴스와 공시 모두 시간 가중치(오늘=1.00, 오래될수록 감소)가 표시되어 있습니다.
         이 정보를 종합하여 향후 주가에 미칠 영향의 감성 점수(-100에서 100)를 산출해주세요.
         -100에 가까울수록 매우 부정적(악재), 100에 가까울수록 매우 긍정적(호재)입니다.
 
@@ -385,20 +425,35 @@ class NewsAgent:
         }}
         """
 
-        try:
-            response = self.client.chat.completions.create(
-                model=config.DEFAULT_MODEL,
-                messages=[
-                    {"role": "system", "content": "당신은 금융 뉴스 분석 전문가입니다. 반드시 JSON 형식으로만 답변하세요."},
-                    {"role": "user",   "content": prompt},
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.1,   # 일관된 감성 점수 산출
-                max_tokens=200,
-            )
-            return json.loads(response.choices[0].message.content)
-        except Exception as e:
-            logger.error(f"Sentiment analysis error: {e}")
-            return {"sentiment_score": 0, "sentiment_label": "Neutral", "reason": "분석 실패"}
+        for _attempt in range(3):
+            try:
+                response = self.client.chat.completions.create(
+                    model=config.DEFAULT_MODEL,
+                    messages=[
+                        {"role": "system", "content": "당신은 금융 뉴스 분석 전문가입니다. 반드시 JSON 형식으로만 답변하세요."},
+                        {"role": "user",   "content": prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.1,   # 일관된 감성 점수 산출
+                    max_tokens=200,
+                )
+                result = json.loads(response.choices[0].message.content)
+                # 감성 점수 범위 클램핑 (-100~100 보장)
+                try:
+                    result['sentiment_score'] = max(-100, min(100, int(float(result.get('sentiment_score', 0)))))
+                except (TypeError, ValueError):
+                    result['sentiment_score'] = 0
+                return result
+            except _OpenAIRateLimitError:
+                if _attempt < 2:
+                    wait = 10 * (2 ** _attempt)  # 10s → 20s
+                    logger.warning(f"[뉴스감성] GPT Rate limit, {wait}초 후 재시도 ({_attempt + 1}/3)")
+                    time.sleep(wait)
+                else:
+                    logger.error("GPT Rate limit: 재시도 한도 초과")
+            except Exception as e:
+                logger.error(f"Sentiment analysis error: {e}")
+                break
+        return {"sentiment_score": 0, "sentiment_label": "Neutral", "reason": "분석 실패"}
 
 news_agent = NewsAgent()

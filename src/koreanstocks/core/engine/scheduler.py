@@ -12,8 +12,22 @@ logger = logging.getLogger(__name__)
 def run_daily_update():
     """매일 수행할 자동화 작업: 데이터 갱신 및 유망 종목 알림"""
     logger.info("Starting daily automated update...")
-    
+
     try:
+        # 0. 지난 추천 성과 기록 (5·10·20 거래일 후 실제 수익률 집계)
+        logger.info("Recording past recommendation outcomes...")
+        try:
+            from koreanstocks.core.utils.outcome_tracker import (
+                record_outcomes, get_outcome_stats, get_recent_outcomes
+            )
+            updated = record_outcomes()
+            if updated > 0:
+                stats   = get_outcome_stats()
+                recent  = get_recent_outcomes(days=14)
+                notifier.notify_performance_report(stats, recent)
+        except Exception as e:
+            logger.warning(f"Outcome tracking 실패 (분석은 계속 진행): {e}")
+
         # 1. 시장 종목 리스트 갱신 및 DB 저장
         logger.info("Updating stock list...")
         stocks = data_provider.get_stock_list()

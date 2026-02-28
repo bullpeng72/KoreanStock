@@ -12,7 +12,7 @@ KOSPI·KOSDAQ 종목을 기술적 지표, 머신러닝, 뉴스 감성 분석으�
 ## 기술 스택
 
 - **UI:** FastAPI + Reveal.js (일일 브리핑 슬라이드) + Vanilla JS (인터랙티브 대시보드)
-- **CLI:** Typer (`koreanstocks serve / recommend / analyze / train / init / sync / home`)
+- **CLI:** Typer (`koreanstocks serve / recommend / analyze / train / init / sync / home / outcomes`)
 - **AI/LLM:** OpenAI GPT-4o-mini
 - **ML:** Scikit-learn (Random Forest, Gradient Boosting), XGBoost
 - **기술 지표:** `ta` 라이브러리 (RSI, MACD, Bollinger Bands, SMA, OBV)
@@ -30,7 +30,7 @@ requirements.txt                     # 개발/테스트 전용 (pytest 등)
 src/
 └── koreanstocks/
     ├── __init__.py                  # VERSION = "0.2.7"
-    ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init/sync/home)
+    ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init/sync/home/outcomes)
     ├── api/
     │   ├── app.py                   # FastAPI 앱 팩토리, StaticFiles 마운트
     │   ├── dependencies.py          # 공통 의존성 (db_manager, analysis_agent 등)
@@ -52,7 +52,7 @@ src/
         ├── config.py                # 환경변수 및 설정 (dotenv), VERSION 상수
         ├── data/
         │   ├── provider.py          # 주가·뉴스 데이터 수집
-        │   └── database.py          # SQLite CRUD
+        │   └── database.py          # SQLite CRUD (recommendations, recommendation_outcomes 등)
         ├── engine/
         │   ├── indicators.py        # 기술적 지표 계산 (RSI, MACD, BB 등)
         │   ├── strategy.py          # 전략별 시그널 생성 (TechnicalStrategy)
@@ -63,7 +63,8 @@ src/
         │   └── scheduler.py         # 자동화 워크플로우
         └── utils/
             ├── backtester.py        # 전략 성과 검증 엔진
-            └── notifier.py          # 텔레그램 리포트 발송
+            ├── notifier.py          # 텔레그램 리포트 발송
+            └── outcome_tracker.py   # 추천 결과 검증 (5·10·20거래일 후 성과 기록)
 models/saved/                        # 학습된 ML 모델 (.pkl) 및 파라미터 (.json)
 data/storage/                        # SQLite DB 파일
 train_models.py                      # ML 모델 재학습 스크립트
@@ -122,6 +123,11 @@ koreanstocks analyze 005930
 # ML 모델 재학습
 koreanstocks train
 python train_models.py                 # 직접 실행도 가능
+
+# 추천 결과 성과 추적 (5·10·20거래일 후 실적 검증)
+koreanstocks outcomes                  # 미검증 추천 결과 업데이트 + 통계 출력
+koreanstocks outcomes --days 180       # 최근 180일 성과 조회
+koreanstocks outcomes --no-record      # DB 업데이트 없이 통계만 출력
 
 # 단위 테스트 실행
 pytest tests/

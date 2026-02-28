@@ -102,6 +102,68 @@ class StockPredictionModel:
             logger.warning(f"Failed to fetch {index_symbol} market data: {e}")
         return pd.DataFrame()
 
+    def _get_xs_market_data(self, today_str: str) -> Dict[str, pd.Series]:
+        """전체 시장 PBR/PER/수급 크로스섹셔널 데이터를 당일 1회 캐싱.
+
+        Returns: {'pbr': Series, 'per': Series, 'foreign': Series, 'inst': Series}
+        인덱스: 종목 코드. 비거래일엔 최근 거래일까지 최대 7일 역탐색.
+        """
+        cache_key = '__xs_market__'
+        cached = self._market_cache.get(cache_key, {})
+        if cached.get('date') == today_str and 'data' in cached:
+            return cached['data']
+
+        result: Dict[str, pd.Series] = {}
+        try:
+            from pykrx import stock as pykrx_stock
+            ref_date = ''
+            # 비거래일 대응: 최근 거래일까지 최대 7일 역탐색
+            for i in range(7):
+                d = (datetime.now() - timedelta(days=i)).strftime('%Y%m%d')
+                try:
+                    fund_df = pykrx_stock.get_market_fundamental_by_ticker(d, market='ALL')
+                    if not fund_df.empty:
+                        ref_date = d
+                        if 'PBR' in fund_df.columns:
+                            result['pbr'] = fund_df['PBR'].replace(0, np.nan).dropna()
+                        if 'PER' in fund_df.columns:
+                            result['per'] = fund_df['PER'].replace(0, np.nan).dropna()
+                        break
+                except Exception:
+                    continue
+
+            if ref_date:
+                try:
+                    trade_df = pykrx_stock.get_market_trading_value_by_ticker(ref_date, market='ALL')
+                    if not trade_df.empty:
+                        if '외국인합계' in trade_df.columns:
+                            result['foreign'] = trade_df['외국인합계']
+                        if '기관합계' in trade_df.columns:
+                            result['inst'] = trade_df['기관합계']
+                except Exception as e:
+                    logger.debug(f"XS 수급 데이터 실패: {e}")
+
+            self._market_cache[cache_key] = {'data': result, 'date': today_str}
+            logger.info(f"XS 시장 데이터 캐시 완료 (기준일: {ref_date}, {len(result)}개 시리즈)")
+        except Exception as e:
+            logger.warning(f"XS 시장 데이터 수집 실패: {e}")
+
+        return result
+
+    @staticmethod
+    def _xs_rank(value: float, series: pd.Series) -> float:
+        """값의 크로스섹셔널 백분위 순위 (0~100).
+
+        0 = 전체 최하위, 100 = 전체 최상위.
+        값이 없거나 시리즈가 비어 있으면 중립값 50.0 반환.
+        """
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return 50.0
+        valid = series.dropna()
+        if valid.empty:
+            return 50.0
+        return round(float((valid < value).sum() / len(valid) * 100), 2)
+
     def prepare_features(self, df: pd.DataFrame,
                          market_df: pd.DataFrame = None) -> pd.DataFrame:
         """원본 OHLCV에서 지표를 계산한 뒤 특성(Feature) 생성"""
@@ -173,9 +235,10 @@ class StockPredictionModel:
         return feat.replace([np.inf, -np.inf], np.nan).dropna()
 
     def _get_pykrx_features(self, code: str, df: pd.DataFrame) -> Dict[str, float]:
-        """PyKrx에서 해당 종목의 최근 펀더멘털/투자자 피처를 반환 (당일 캐싱).
+        """PyKrx에서 해당 종목의 펀더멘털/투자자 피처를 반환 (당일 캐싱).
 
-        크로스섹셔널 순위(XS) 피처는 단일 종목 추론이므로 중립값(50.0) 사용.
+        XS(크로스섹셔널) 순위 피처는 전체 시장 데이터(_get_xs_market_data)를 기준으로
+        실제 백분위 순위를 계산한다. 시장 데이터 미수신 시 중립값(50.0) 폴백.
         """
         from datetime import date as _date
         today = _date.today().isoformat()
@@ -196,14 +259,14 @@ class StockPredictionModel:
             return neutral
 
         try:
-            end_dt   = datetime.now()
-            start_dt = end_dt - timedelta(days=60)
+            end_dt    = datetime.now()
+            start_dt  = end_dt - timedelta(days=60)
             start_str = start_dt.strftime('%Y%m%d')
             end_str   = end_dt.strftime('%Y%m%d')
 
             result = dict(neutral)
 
-            # 펀더멘털 (PBR, PER, DIV)
+            # 1. 펀더멘털 (PBR, PER, DIV) — 개별 종목 시계열
             try:
                 fund_df = pykrx_stock.get_market_fundamental_by_date(start_str, end_str, code)
                 fund_df.index = pd.to_datetime(fund_df.index)
@@ -215,7 +278,9 @@ class StockPredictionModel:
             except Exception as e:
                 logger.debug(f"[PyKrx] {code} fundamental 실패: {e}")
 
-            # 외국인/기관 5일 누적 순매수 비율
+            # 2. 외국인/기관 5일 누적 순매수 비율 — 개별 종목 시계열
+            foreign_today_raw = 0.0
+            inst_today_raw    = 0.0
             try:
                 trade_df = pykrx_stock.get_market_trading_value_by_date(start_str, end_str, code)
                 trade_df.index = pd.to_datetime(trade_df.index)
@@ -229,14 +294,23 @@ class StockPredictionModel:
                         ratio = (foreign_5d / turnover_5d).clip(-0.5, 0.5).fillna(0)
                         if not ratio.empty:
                             result['foreign_5d_ratio'] = float(ratio.iloc[-1])
+                        foreign_today_raw = float(trade_df['외국인합계'].iloc[-1])
 
                     if '기관합계' in trade_df.columns:
                         inst_5d = trade_df['기관합계'].rolling(5, min_periods=1).sum()
                         ratio   = (inst_5d / turnover_5d).clip(-0.5, 0.5).fillna(0)
                         if not ratio.empty:
                             result['inst_5d_ratio'] = float(ratio.iloc[-1])
+                        inst_today_raw = float(trade_df['기관합계'].iloc[-1])
             except Exception as e:
                 logger.debug(f"[PyKrx] {code} trading 실패: {e}")
+
+            # 3. XS 순위 — 전체 시장 데이터 기준 실제 백분위 계산 (중립 50 하드코딩 제거)
+            xs = self._get_xs_market_data(today)
+            result['pbr_xs']     = self._xs_rank(result['pbr'],         xs.get('pbr',     pd.Series()))
+            result['per_xs']     = self._xs_rank(result['per'],         xs.get('per',     pd.Series()))
+            result['foreign_xs'] = self._xs_rank(foreign_today_raw,     xs.get('foreign', pd.Series()))
+            result['inst_xs']    = self._xs_rank(inst_today_raw,        xs.get('inst',    pd.Series()))
 
             self._pykrx_cache[code] = {'data': result, 'date': today}
             return result

@@ -31,7 +31,16 @@ def add_to_watchlist(body: WatchlistAdd, db=Depends(get_db), dp=Depends(get_data
     if not name:
         stock_list = dp.get_stock_list()
         row = stock_list[stock_list["code"] == body.code]
-        name = row.iloc[0]["name"] if not row.empty else body.code
+        if not row.empty:
+            name = row.iloc[0]["name"]
+        else:
+            # FDR StockListing 실패 시 PyKrx로 폴백
+            try:
+                from pykrx import stock as pykrx_stock
+                name = pykrx_stock.get_market_ticker_name(body.code) or body.code
+            except Exception as e:
+                logger.warning(f"PyKrx 종목명 조회 실패 [{body.code}]: {e}")
+                name = body.code
     db.add_to_watchlist(body.code, name)
     return {"code": body.code, "name": name}
 

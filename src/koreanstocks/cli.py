@@ -431,6 +431,67 @@ def init(
 
 
 @app.command()
+def outcomes(
+    days: int = typer.Option(90, help="최근 N일간 통계 조회"),
+    no_record: bool = typer.Option(False, "--no-record", help="성과 기록 없이 조회만"),
+):
+    """
+    [bold]추천 성과 조회[/bold] — 지난 AI 추천의 실제 수익률 확인
+
+    추천 후 5·10·20 거래일이 경과한 종목의 실제 주가를 수집하여
+    정답률·평균 수익률·목표가 달성률을 계산합니다.
+
+    [bold]예시:[/bold]
+    [dim]  koreanstocks outcomes[/dim]
+    [dim]  koreanstocks outcomes --days 30[/dim]
+    [dim]  koreanstocks outcomes --no-record   # 기록 없이 조회만[/dim]
+    """
+    from koreanstocks.core.utils.outcome_tracker import (
+        record_outcomes, get_outcome_stats, get_recent_outcomes
+    )
+
+    if not no_record:
+        typer.echo("성과 기록 중...")
+        updated = record_outcomes()
+        typer.echo(f"  새로 업데이트: {updated}건")
+
+    stats    = get_outcome_stats(days=days)
+    outcomes_list = get_recent_outcomes(days=days)
+
+    if not stats or stats.get("total", 0) == 0:
+        typer.echo("\n성과 데이터가 없습니다. 추천 후 5거래일 이상 지나야 집계됩니다.")
+        return
+
+    typer.echo(f"\n=== 최근 {days}일 추천 성과 ({stats['total']}건) ===")
+    for n, label in [(5, " 5거래일"), (10, "10거래일"), (20, "20거래일")]:
+        ev = stats.get(f"evaluated_{n}d", 0)
+        if ev == 0:
+            continue
+        wr  = stats.get(f"win_rate_{n}d",  0)
+        ret = stats.get(f"avg_return_{n}d", 0)
+        typer.echo(f"  {label}: 정답률 {wr:.0f}%  평균 {ret:+.2f}%  ({ev}건)")
+
+    thr = stats.get("target_hit_rate")
+    if thr is not None:
+        typer.echo(f"  목표가 달성률: {thr:.0f}%")
+
+    if outcomes_list:
+        typer.echo(f"\n개별 성과 (최근 {min(15, len(outcomes_list))}건):")
+        for o in outcomes_list[:15]:
+            action = o.get("action", "?")
+            r5  = o["outcome_5d"].get("return_pct")
+            c5  = o["outcome_5d"].get("correct")
+            r20 = o["outcome_20d"].get("return_pct")
+            hit = "✅" if c5 == 1 else ("❌" if c5 == 0 else "⏳")
+            r5_str  = f"{r5:+.1f}%"  if r5  is not None else "집계중"
+            r20_str = f"{r20:+.1f}%" if r20 is not None else "집계중"
+            typer.echo(
+                f"  {hit} [{o['session_date']}] {o['name']}({o['code']}) "
+                f"{action}  5d:{r5_str}  20d:{r20_str}"
+            )
+
+
+@app.command()
 def home(
     open_dir: bool = typer.Option(False, "--open", "-o", help="파일 탐색기로 홈 디렉토리 열기"),
     setup: bool = typer.Option(False, "--setup", "-s", help="셸 alias 스니펫 출력"),

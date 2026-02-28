@@ -116,4 +116,56 @@ class TelegramNotifier:
         blocks.append(f"{sep}\n💡 대시보드에서 상세 리포트를 확인하세요.")
         self.send_message("\n\n".join(blocks), parse_mode="HTML")
 
+    def notify_performance_report(self, stats: dict, recent_outcomes: list):
+        """지난 추천 성과 리포트를 텔레그램으로 전송.
+
+        stats           — get_outcome_stats() 결과
+        recent_outcomes — get_recent_outcomes() 결과 (최근 14일)
+        """
+        if not stats or stats.get("total", 0) == 0:
+            return
+
+        sep   = "─" * 26
+        total = stats["total"]
+        lines = [f"📈 <b>AI 추천 성과 리포트</b>\n{sep}",
+                 f"📊 <b>최근 90일 통계</b> (총 {total}건)"]
+
+        for n, label in [(5, "5거래일 "), (10, "10거래일"), (20, "20거래일")]:
+            ev  = stats.get(f"evaluated_{n}d", 0)
+            if ev == 0:
+                continue
+            wr  = stats.get(f"win_rate_{n}d",  0)
+            ret = stats.get(f"avg_return_{n}d", 0)
+            bar_filled = min(10, round(wr / 10))
+            bar = "█" * bar_filled + "░" * (10 - bar_filled)
+            lines.append(
+                f"  {label}: <code>[{bar}]</code> 정답 {wr:.0f}%  "
+                f"평균 {ret:+.1f}%  ({ev}건)"
+            )
+
+        thr = stats.get("target_hit_rate")
+        if thr is not None:
+            lines.append(f"  목표가 달성률: {thr:.0f}%")
+
+        # 새로 집계 완료된 종목 (5거래일 결과가 있고 최근 2일 이내 업데이트)
+        new_5d = [o for o in recent_outcomes
+                  if o.get("outcome_5d", {}).get("return_pct") is not None][:5]
+        if new_5d:
+            lines.append(f"\n{sep}\n<b>새로 집계된 성과</b>")
+            for o in new_5d:
+                action = o.get("action", "?")
+                icon   = {"BUY": "🟢", "SELL": "🔴"}.get(action, "🟡")
+                r5     = o["outcome_5d"].get("return_pct")
+                c5     = o["outcome_5d"].get("correct")
+                hit    = "✅" if c5 == 1 else "❌"
+                r5_str = f"{r5:+.1f}%" if r5 is not None else "-"
+                lines.append(
+                    f"  {hit} {icon} <b>{o['name']}</b>({o['code']}) "
+                    f"[{o['session_date']}] {action} → 5d: {r5_str}"
+                )
+
+        lines.append(sep)
+        self.send_message("\n".join(lines), parse_mode="HTML")
+
+
 notifier = TelegramNotifier()

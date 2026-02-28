@@ -5,6 +5,11 @@ on:
     # 한국 시간(KST) 평일 오후 4시 30분 실행 (UTC 07:30)
     - cron: '30 7 * * 1-5'
   workflow_dispatch: # 수동 실행 버튼 추가
+    inputs:
+      force_run:
+        description: '거래일 여부와 관계없이 강제 실행 (테스트용)'
+        type: boolean
+        default: false
 
 jobs:
   analyze:
@@ -40,7 +45,50 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
 
+      - name: Check trading day
+        id: check_trading_day
+        env:
+          FORCE_RUN: ${{ inputs.force_run || 'false' }}
+        run: |
+          python3 << 'PYEOF'
+          import sys, os
+          from datetime import datetime
+
+          force_run = os.environ.get('FORCE_RUN', 'false').lower() == 'true'
+          if force_run:
+              print('강제 실행 모드: 거래일 체크 건너뜀')
+              is_trading = True
+          else:
+              try:
+                  from pykrx import stock
+                  today = datetime.now().strftime('%Y%m%d')
+                  # 삼성전자 당일 OHLCV 조회 — 데이터 있으면 거래일
+                  df = stock.get_market_ohlcv(today, ticker='005930')
+                  is_trading = not df.empty
+              except Exception as e:
+                  print(f'거래일 확인 실패: {e} → 거래일로 간주하고 실행', file=sys.stderr)
+                  is_trading = True  # 실패 시 안전하게 분석 실행
+
+          result = 'true' if is_trading else 'false'
+          print(f'오늘({datetime.now().strftime("%Y-%m-%d")}) 거래일 여부: {result}')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
+              fh.write(f'is_trading_day={result}\n')
+          PYEOF
+
+      - name: Notify non-trading day
+        if: steps.check_trading_day.outputs.is_trading_day == 'false'
+        run: |
+          DATE=$(TZ=Asia/Seoul date +'%Y년 %m월 %d일')
+          MSG="📅 ${DATE}은 한국 증시 휴장일입니다.%0A오늘은 AI 종목 추천을 건너뜁니다."
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            -d "text=${MSG}"
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
       - name: Run daily analysis
+        if: steps.check_trading_day.outputs.is_trading_day == 'true'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
@@ -60,6 +108,7 @@ jobs:
           overwrite: true
 
       - name: Commit updated DB to repository
+        if: steps.check_trading_day.outputs.is_trading_day == 'true'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

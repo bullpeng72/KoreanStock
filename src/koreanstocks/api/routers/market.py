@@ -1,5 +1,6 @@
 """시장 현황 라우터 — GET /api/market"""
 import logging
+from datetime import datetime
 from fastapi import APIRouter, Depends
 from koreanstocks.api.dependencies import get_data_provider
 
@@ -20,6 +21,16 @@ def get_market(dp=Depends(get_data_provider)):
     except Exception as e:
         logger.error(f"시장 지수 조회 오류: {e}")
         return {"error": str(e)}
+
+
+@router.get("/market/trading-day")
+def get_trading_day(dp=Depends(get_data_provider)):
+    """오늘이 한국 증시 거래일인지 여부 반환"""
+    is_trading = dp.is_trading_day()
+    return {
+        "is_trading_day": is_trading,
+        "date": datetime.now().strftime('%Y-%m-%d'),
+    }
 
 
 @router.get("/market/ranking")

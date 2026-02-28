@@ -59,10 +59,25 @@ def run_recommendations(
     limit: int = Query(5),
     market: str = Query("ALL"),
     theme: str = Query("전체", description="테마: 전체 | AI/인공지능 | 반도체 | 이차전지 | 제약/바이오 | 로봇/자동화"),
+    force: bool = Query(False, description="오늘 결과가 있어도 강제 재분석"),
+    db=Depends(get_db),
 ):
-    """새 추천 분석 실행 (백그라운드). 즉시 202 반환."""
+    """새 추천 분석 실행 (백그라운드). 즉시 202 반환.
+    오늘 이미 분석 결과가 DB에 있으면 재사용 (force=true 시 강제 재실행).
+    """
     if _running:
         return {"status": "already_running", "message": "분석이 이미 진행 중입니다."}
+
+    # 오늘 이미 분석된 결과가 있으면 GPT 재호출 없이 DB 결과 재사용
+    if not force:
+        from datetime import date as _date
+        today = _date.today().isoformat()
+        existing = db.get_recommendations_by_date(today)
+        if existing:
+            return {
+                "status": "cached",
+                "message": f"오늘({today}) 분석 결과 {len(existing)}개가 이미 있습니다. 강제 재실행은 ?force=true를 사용하세요.",
+            }
 
     theme_map = {
         "AI/인공지능":  ["AI", "인공지능", "소프트웨어", "데이터"],
@@ -81,3 +96,19 @@ def run_recommendations(
 def analysis_status():
     """백그라운드 분석 실행 여부"""
     return {"running": _running}
+
+
+@router.get("/recommendations/outcomes")
+def recommendation_outcomes(
+    days: int = Query(90, ge=1, le=365, description="최근 N일간"),
+):
+    """추천 결과 성과 통계 및 개별 내역 반환.
+
+    stats    — 기간 내 집계 통계 (정답률, 평균 수익률, 목표가 달성률)
+    outcomes — 종목별 개별 성과 목록
+    """
+    from koreanstocks.core.utils.outcome_tracker import get_outcome_stats, get_recent_outcomes
+    return {
+        "stats":    get_outcome_stats(days=days),
+        "outcomes": get_recent_outcomes(days=days),
+    }

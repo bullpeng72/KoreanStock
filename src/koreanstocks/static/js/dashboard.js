@@ -725,18 +725,28 @@ async function loadRecsByDate() {
   }
 }
 
-async function runRecommendations() {
+async function runRecommendations(force = false) {
   const market = document.getElementById("rec-market").value;
   const theme  = document.getElementById("rec-theme").value;
   const limit  = document.getElementById("rec-limit").value;
   setStatus("rec-run-status", "분석 요청 중…");
   try {
     const res = await api(
-      `/api/recommendations/run?market=${market}&theme=${encodeURIComponent(theme)}&limit=${limit}`,
+      `/api/recommendations/run?market=${market}&theme=${encodeURIComponent(theme)}&limit=${limit}&force=${force}`,
       { method: "POST" }
     );
-    setStatus("rec-run-status", res.message || "분석 시작됨");
-    pollRecStatus();
+    if (res.status === "cached") {
+      const el = document.getElementById("rec-run-status");
+      if (el) {
+        el.style.color = "var(--muted)";
+        el.innerHTML = `✅ ${res.message} <a href="javascript:runRecommendations(true)" style="color:var(--accent);text-decoration:underline">강제 재실행</a>`;
+      }
+      // 캐시된 결과이므로 날짜 목록 갱신하여 바로 조회
+      await loadRecDates();
+    } else {
+      setStatus("rec-run-status", res.message || "분석 시작됨");
+      pollRecStatus();
+    }
   } catch (e) {
     setStatus("rec-run-status", e.message, true);
   }
@@ -912,16 +922,41 @@ function renderBtResult(data, capital) {
   }
 
   // 해석 가이드 등급표
-  const mddGrade = mdd > -10 ? "안전 ✅" : mdd > -25 ? "주의 🟡" : "위험 🔴";
-  const wrGrade  = wr >= 60  ? "우수 ✅" : wr >= 50  ? "보통 🟡" : "낮음 🔴";
-  const retGrade = total >= 10 ? "양호 ✅" : total >= 0 ? "보통 🟡" : "손실 🔴";
-  const bnhGrade = beatBnh ? "전략 우위 ✅" : "보유 우위 🟡";
+  const sharpe      = data.sharpe_ratio ?? 0;
+  const mddGrade    = mdd > -10   ? "안전 ✅" : mdd > -25  ? "주의 🟡" : "위험 🔴";
+  const wrGrade     = wr  >= 60   ? "우수 ✅" : wr  >= 50   ? "보통 🟡" : "낮음 🔴";
+  const retGrade    = total >= 10 ? "양호 ✅" : total >= 0  ? "보통 🟡" : "손실 🔴";
+  const bnhGrade    = beatBnh     ? "전략 우위 ✅"          : "보유 우위 🟡";
+  const sharpeGrade = sharpe >= 1.0 ? "우수 ✅" : sharpe >= 0.5 ? "보통 🟡" : "미흡 🔴";
 
+  const sub = t => `<br><small style="color:var(--muted);font-size:.88em">${t}</small>`;
   document.getElementById("bt-grade-tbody").innerHTML = `
-    <tr><td>총 수익률</td><td>${total}%</td><td>10% 이상이면 양호</td><td>${retGrade}</td></tr>
-    <tr><td>최대 낙폭(MDD)</td><td>${mdd}%</td><td>-10% 이내면 안전</td><td>${mddGrade}</td></tr>
-    <tr><td>승률</td><td>${wr}%</td><td>60% 이상이면 우수</td><td>${wrGrade}</td></tr>
-    <tr><td>단순 보유 대비</td><td>${(total - bnh) >= 0 ? "+" : ""}${(total - bnh).toFixed(1)}%p</td><td>0 이상이면 전략 유리</td><td>${bnhGrade}</td></tr>`;
+    <tr>
+      <td>총 수익률</td><td>${total}%</td>
+      <td>✅ 10% 이상 양호 &nbsp;🟡 0~10% 보통 &nbsp;🔴 음수 손실${sub("전략 적용 기간의 원금 대비 최종 수익률입니다.")}</td>
+      <td>${retGrade}</td>
+    </tr>
+    <tr>
+      <td>최대 낙폭<br><span style="font-size:.85em;color:var(--muted)">(MDD)</span></td><td>${mdd}%</td>
+      <td>✅ -10% 이내 안전 &nbsp;🟡 -25% 이내 주의 &nbsp;🔴 -25% 초과 위험${sub("전략 진행 중 고점 대비 최대로 하락한 폭입니다. 실전에서 이 낙폭을 견뎌야 전략을 유지할 수 있습니다. 총 수익이 좋아도 MDD가 크면 중간에 공포로 손절할 위험이 있습니다.")}</td>
+      <td>${mddGrade}</td>
+    </tr>
+    <tr>
+      <td>승률</td><td>${wr}%</td>
+      <td>✅ 60% 이상 우수 &nbsp;🟡 50~60% 보통 &nbsp;🔴 50% 미만 낮음${sub("매수 포지션 보유일 중 수익이 발생한 날의 비율입니다. 단, 낮은 승률이라도 수익이 날 때 크고 손실이 작으면 전체 수익률은 양호할 수 있습니다.")}</td>
+      <td>${wrGrade}</td>
+    </tr>
+    <tr>
+      <td>샤프 지수</td><td>${sharpe.toFixed(2)}</td>
+      <td>✅ 1.0 이상 우수 &nbsp;🟡 0.5~1.0 보통 &nbsp;🔴 0.5 미만 미흡${sub("변동성(위험) 1단위당 얻는 초과 수익을 나타냅니다. 수익률이 같아도 샤프 지수가 높은 전략이 더 안정적입니다.")}</td>
+      <td>${sharpeGrade}</td>
+    </tr>
+    <tr>
+      <td>단순 보유 대비<br><span style="font-size:.85em;color:var(--muted)">(B&H 비교)</span></td>
+      <td>${(total - bnh) >= 0 ? "+" : ""}${(total - bnh).toFixed(1)}%p</td>
+      <td>✅ 0%p 이상 전략 유리 &nbsp;🟡 음수면 단순 보유가 유리${sub("같은 기간 처음부터 끝까지 보유만 했을 때(Buy &amp; Hold)와 비교입니다. 복잡한 전략이 단순 보유보다 못한 경우도 많으므로 반드시 확인해야 합니다.")}</td>
+      <td>${bnhGrade}</td>
+    </tr>`;
 
   // 최근 10거래일 테이블
   if (data.recent_rows?.length) {
@@ -932,6 +967,156 @@ function renderBtResult(data, capital) {
       data.recent_rows.map(row =>
         `<tr>${keys.map(k => `<td>${row[k]}</td>`).join("")}</tr>`
       ).join("");
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// Tab 3 — 추천 성과 추적 (Outcome Tracker)
+// ═══════════════════════════════════════════════════════
+
+let _outcomeDays = 90;
+
+async function loadOutcomes(days) {
+  const statsEl = document.getElementById("outcome-stats");
+  const listEl  = document.getElementById("outcome-list");
+  if (!statsEl) return;
+  statsEl.className = "result-grid";
+  statsEl.innerHTML = `<span style="color:var(--muted);font-size:.85em;grid-column:1/-1">로딩 중…</span>`;
+  try {
+    const data = await api(`/api/recommendations/outcomes?days=${days}`);
+    statsEl.innerHTML = _outcomeStatsHtml(data.stats);
+    if (listEl) listEl.innerHTML = _outcomeListHtml(data.outcomes);
+  } catch (e) {
+    statsEl.className = "";
+    statsEl.innerHTML = `<span style="color:var(--sell)">${e.message}</span>`;
+  }
+}
+
+function _outcomeStatsHtml(stats) {
+  if (!stats || stats.total === 0) {
+    return `<div style="color:var(--muted);font-size:.88em;grid-column:1/-1;padding:6px 0">
+      아직 집계된 성과 데이터가 없습니다.
+      추천 후 <strong>5거래일(약 1주일)</strong>이 지나면 자동으로 수집됩니다.
+    </div>`;
+  }
+
+  function statCard(label, ev, wr, ret) {
+    if (!ev) {
+      return `<div class="result-card">
+        <div class="rc-label">${label}</div>
+        <div class="rc-val" style="color:var(--muted)">—</div>
+        <div class="rc-delta" style="color:var(--muted)">집계중</div>
+      </div>`;
+    }
+    const wrClass  = wr >= 60 ? "pos" : wr >= 40 ? "" : "neg";
+    const retClass = ret > 0  ? "pos" : ret < 0 ? "neg" : "";
+    return `<div class="result-card">
+      <div class="rc-label">${label}</div>
+      <div class="rc-val ${wrClass}">${wr.toFixed(0)}%</div>
+      <div class="rc-delta ${retClass}">평균 ${ret >= 0 ? "+" : ""}${ret.toFixed(1)}% · ${ev}건</div>
+    </div>`;
+  }
+
+  const thr = stats.target_hit_rate;
+  const thrCard = thr != null
+    ? `<div class="result-card">
+        <div class="rc-label">🎯 목표가 달성률</div>
+        <div class="rc-val ${thr >= 50 ? "pos" : "neg"}">${thr.toFixed(0)}%</div>
+        <div class="rc-delta" style="color:var(--muted)">20거래일 이내</div>
+      </div>`
+    : `<div class="result-card">
+        <div class="rc-label">🎯 목표가 달성률</div>
+        <div class="rc-val" style="color:var(--muted)">—</div>
+        <div class="rc-delta" style="color:var(--muted)">집계중</div>
+      </div>`;
+
+  return statCard(" 5거래일 정답률", stats.evaluated_5d,  stats.win_rate_5d,  stats.avg_return_5d)
+       + statCard("10거래일 정답률", stats.evaluated_10d, stats.win_rate_10d, stats.avg_return_10d)
+       + statCard("20거래일 정답률", stats.evaluated_20d, stats.win_rate_20d, stats.avg_return_20d)
+       + thrCard;
+}
+
+function _outcomeListHtml(outcomes) {
+  if (!outcomes || !outcomes.length) return "";
+
+  function retCell(o) {
+    const ret = o.return_pct;
+    if (ret == null) return `<td style="color:var(--muted);text-align:right">집계중</td>`;
+    const cls  = ret > 0 ? "pos" : ret < 0 ? "neg" : "";
+    const icon = o.correct === 1 ? "✅" : o.correct === 0 ? "❌" : "";
+    return `<td class="${cls}" style="text-align:right">${icon} ${ret >= 0 ? "+" : ""}${ret.toFixed(1)}%</td>`;
+  }
+
+  const rows = outcomes.map(o => {
+    const dateShort = (o.session_date || "").slice(5);
+    return `<tr>
+      <td style="color:var(--muted)">${dateShort}</td>
+      <td><span style="font-weight:500">${o.name || o.code}</span>
+          <span style="font-size:.78em;color:var(--muted);margin-left:4px">${o.code}</span></td>
+      <td>${badgeHtml(o.action)}</td>
+      <td style="text-align:right;color:var(--muted)">₩${fmt(o.entry_price)}</td>
+      ${retCell(o.outcome_5d)}
+      ${retCell(o.outcome_10d)}
+      ${retCell(o.outcome_20d)}
+      <td style="text-align:right;color:var(--muted)">${o.target_price ? "₩" + fmt(o.target_price) : "—"}</td>
+    </tr>`;
+  }).join("");
+
+  return `<table class="bt-data-table">
+    <thead><tr>
+      <th style="text-align:left">날짜</th>
+      <th style="text-align:left">종목</th>
+      <th style="text-align:left">액션</th>
+      <th>진입가</th>
+      <th>5거래일</th>
+      <th>10거래일</th>
+      <th>20거래일</th>
+      <th>AI 목표가</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function initOutcomeDaysBtns() {
+  const container = document.getElementById("outcome-days-filter");
+  if (!container) return;
+  container.querySelectorAll(".theme-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      container.querySelectorAll(".theme-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      _outcomeDays = parseInt(btn.dataset.days);
+      loadOutcomes(_outcomeDays);
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+// 거래일 체크
+// ═══════════════════════════════════════════════════════
+
+function _tradingNoticeHtml(date) {
+  return `<div style="margin-top:10px;padding:10px 14px;border-radius:8px;
+      background:rgba(255,170,0,.12);border:1px solid rgba(255,170,0,.35);
+      color:#ffaa00;font-size:.88em;line-height:1.5">
+    📅 <strong>${date}</strong>은 한국 증시 <strong>휴장일</strong>입니다.<br>
+    분석을 실행해도 시장 데이터가 없어 정확한 결과를 얻기 어렵습니다.
+    이전 거래일 추천 결과를 참고하세요.
+  </div>`;
+}
+
+async function checkTradingDay() {
+  try {
+    const res = await api("/api/market/trading-day");
+    console.log("[trading-day]", res);
+    if (!res.is_trading_day) {
+      const html = _tradingNoticeHtml(res.date);
+      const rec = document.getElementById("rec-trading-notice");
+      const settings = document.getElementById("settings-trading-notice");
+      if (rec) rec.innerHTML = html;
+      if (settings) settings.innerHTML = html;
+    }
+  } catch (e) {
+    console.warn("[trading-day] 확인 실패:", e.message);
   }
 }
 
@@ -993,10 +1178,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     _recTheme = theme;
     renderRecList("rec-list", _recRecs, _recTheme);
   });
+  loadOutcomes(90);
+  initOutcomeDaysBtns();
 
   // 탭 4 — Backtest
   initStrategyFilter();
 
   // 탭 5 — Settings
   loadTelegramStatus();
+
+  // 거래일 여부 확인 (Tab 3, Tab 5 안내)
+  checkTradingDay();
 });

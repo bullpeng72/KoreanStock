@@ -15,6 +15,7 @@ class StockDataProvider:
     def __init__(self):
         self._krx_cache = None
         self._krx_timestamp = None
+        self._krx_fail_timestamp = None  # KRX API 실패 시각 (단기 재시도 차단)
         self._market_cache = None
         self._market_timestamp = None
         self._ohlcv_cache: Dict[str, tuple] = {}  # key: "code_period" → (timestamp, df)
@@ -32,6 +33,11 @@ class StockDataProvider:
         if self._krx_cache is not None and self._krx_timestamp:
             if (now - self._krx_timestamp).total_seconds() < config.CACHE_EXPIRE_STOCKS:
                 return self._krx_cache
+
+        # 최근 5분 이내 실패한 경우 KRX API 재시도 차단 (반복 오류 방지)
+        if self._krx_fail_timestamp:
+            if (now - self._krx_fail_timestamp).total_seconds() < 300:
+                return self._krx_cache if self._krx_cache is not None else pd.DataFrame(columns=['code', 'name', 'market', 'sector', 'industry'])
 
         try:
             # KRX 전체 종목 리스트를 가져오는 것이 더 안정적입니다.
@@ -90,6 +96,7 @@ class StockDataProvider:
             self._krx_timestamp = now
             return df
         except Exception as e:
+            self._krx_fail_timestamp = now  # 5분간 재시도 차단
             logger.error(f"Error fetching stock list: {e}")
             return self._krx_cache if self._krx_cache is not None else pd.DataFrame(columns=['code', 'name', 'market', 'sector', 'industry'])
 
@@ -152,6 +159,8 @@ class StockDataProvider:
             # FDR/pykrx의 월 경계 날짜 버그는 WARNING으로 처리 (분석은 중립값으로 계속)
             if 'day is out of range' in str(e):
                 logger.warning(f"[{code}] OHLCV 날짜 범위 조회 실패 (FDR 월 경계 버그): {e}")
+            elif str(e).strip() in ('LOGOUT', 'LOGIN'):
+                logger.warning(f"[{code}] OHLCV KRX 세션 만료 (일시적, 자동 갱신됨): {e}")
             else:
                 logger.error(f"Error fetching OHLCV for {code}: {e}")
             return pd.DataFrame()
@@ -236,7 +245,68 @@ class StockDataProvider:
             return result
         except Exception as e:
             logger.error(f"Error fetching market ranking: {e}")
+            # KRX FDR 실패 시 PyKrx로 종목 코드 목록 폴백 (거래량 정렬 없음)
+            # 비거래일엔 당일 목록이 비어있으므로 최근 거래일까지 최대 10일 역탐색
+            try:
+                from pykrx import stock as _pykrx
+                codes = []
+                ref_date = ''
+                for i in range(10):
+                    d = (datetime.now() - timedelta(days=i)).strftime('%Y%m%d')
+                    if market == 'KOSDAQ':
+                        c = _pykrx.get_market_ticker_list(d, market='KOSDAQ')
+                    elif market == 'KOSPI':
+                        c = _pykrx.get_market_ticker_list(d, market='KOSPI')
+                    else:
+                        c = (_pykrx.get_market_ticker_list(d, market='KOSPI') +
+                             _pykrx.get_market_ticker_list(d, market='KOSDAQ'))
+                    if c:
+                        codes = c
+                        ref_date = d
+                        break
+                logger.warning(f"Market ranking: PyKrx 폴백 {len(codes)}개 (기준일: {ref_date}, 거래량 정렬 없음)")
+                if codes:
+                    return codes[:limit]
+            except Exception as e2:
+                logger.error(f"Market ranking PyKrx 폴백 실패: {e2}")
+            # DB 폴백: 최근 추천·분석 이력에서 종목 코드 재사용 (비거래일 강제 실행용)
+            try:
+                from koreanstocks.core.data.database import db_manager
+                with db_manager.get_connection() as conn:
+                    cursor = conn.cursor()
+                    if market != 'ALL':
+                        cursor.execute(
+                            "SELECT DISTINCT code FROM recommendations WHERE json_extract(detail_json, '$.market') = ? ORDER BY session_date DESC LIMIT ?",
+                            (market, limit),
+                        )
+                    else:
+                        cursor.execute(
+                            "SELECT DISTINCT code FROM recommendations ORDER BY session_date DESC LIMIT ?",
+                            (limit,),
+                        )
+                    db_codes = [row[0] for row in cursor.fetchall()]
+                if db_codes:
+                    logger.warning(f"Market ranking: DB 폴백 {len(db_codes)}개 (최근 추천 종목, 비거래일 모드)")
+                    return db_codes[:limit]
+            except Exception as e3:
+                logger.error(f"Market ranking DB 폴백 실패: {e3}")
             return []
+
+    def is_trading_day(self) -> bool:
+        """오늘이 한국 증시 거래일인지 여부 반환.
+
+        get_market_ticker_list() 사용: 비거래일엔 빈 리스트 반환,
+        거래일엔 KOSPI 종목 코드 목록(수백 개) 반환.
+        get_market_ohlcv()는 비거래일에 이전 거래일 데이터를 반환하는 경우가 있어 사용 안 함.
+        """
+        try:
+            from pykrx import stock as _pykrx
+            today = datetime.now().strftime('%Y%m%d')
+            tickers = _pykrx.get_market_ticker_list(today, market='KOSPI')
+            return len(tickers) > 0
+        except Exception as e:
+            logger.warning(f"거래일 확인 실패: {e} → 거래일로 간주")
+            return True  # 판단 불가 시 거래일로 간주 (오탐 방지)
 
     def get_stocks_by_theme(self, keywords: List[str], market: str = 'ALL') -> pd.DataFrame:
         """업종/산업 분야에서 키워드를 검색하여 관련 종목 리스트 반환"""

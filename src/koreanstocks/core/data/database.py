@@ -137,6 +137,30 @@ class DatabaseManager:
                 )
             ''')
 
+            # 8. 추천 결과 검증 테이블 (피드백 루프용)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS recommendation_outcomes (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code         TEXT NOT NULL,
+                    session_date DATE NOT NULL,
+                    action       TEXT NOT NULL,       -- BUY / SELL / HOLD
+                    entry_price  REAL NOT NULL,       -- 추천일 종가 (진입가)
+                    target_price REAL,                -- AI 목표가
+                    price_5d     REAL,                -- 5거래일 후 종가
+                    return_5d    REAL,                -- 5거래일 수익률 (%)
+                    correct_5d   INTEGER,             -- 1=정답 0=오답
+                    price_10d    REAL,
+                    return_10d   REAL,
+                    correct_10d  INTEGER,
+                    price_20d    REAL,
+                    return_20d   REAL,
+                    correct_20d  INTEGER,
+                    target_hit   INTEGER,             -- 20거래일 이내 목표가 달성 여부
+                    updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(code, session_date)
+                )
+            ''')
+
     def get_sentiment_cache(self, cache_key: str) -> Optional[Dict]:
         """당일 감성 분석 캐시 조회. 없으면 None 반환."""
         try:

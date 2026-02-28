@@ -45,6 +45,7 @@
 | **관심 종목 관리** | Watchlist 등록 및 분석 이력 타임라인 제공 |
 | **테마 필터링** | AI · 반도체 · 이차전지 · 바이오 등 테마별 종목 발굴 |
 | **뉴스 기사 링크** | 감성 분석에 활용된 뉴스 기사 원문 링크 제공 |
+| **추천 성과 추적** | 5·10·20거래일 후 실제 수익률 자동 검증, 승률·목표가 달성률 통계 제공 (Web UI + CLI + 텔레그램) |
 
 ---
 
@@ -52,7 +53,7 @@
 
 ```
 UI          FastAPI + Reveal.js (일일 브리핑) + Vanilla JS (인터랙티브 대시보드)
-CLI         Typer (koreanstocks serve / recommend / analyze / train / init / sync / home)
+CLI         Typer (koreanstocks serve / recommend / analyze / train / init / sync / home / outcomes)
 AI/LLM      OpenAI GPT-4o-mini
 ML          Scikit-learn (Random Forest, Gradient Boosting), XGBoost
 기술 지표    ta (RSI, MACD, Bollinger Bands, SMA, OBV)
@@ -74,7 +75,7 @@ KoreanStocks/
 ├── src/
 │   └── koreanstocks/
 │       ├── __init__.py                  # VERSION = "0.2.7"
-│       ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init/sync/home)
+│       ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init/sync/home/outcomes)
 │       ├── api/
 │       │   ├── app.py                   # FastAPI 앱 팩토리, StaticFiles 마운트
 │       │   ├── dependencies.py          # 공통 의존성
@@ -107,7 +108,8 @@ KoreanStocks/
 │           │   └── scheduler.py         # 자동화 워크플로우
 │           └── utils/
 │               ├── backtester.py        # 전략 성과 검증 엔진
-│               └── notifier.py          # 텔레그램 리포트 발송
+│               ├── notifier.py          # 텔레그램 리포트 발송
+│               └── outcome_tracker.py   # 추천 결과 검증 (5·10·20거래일 후 성과 기록)
 ├── models/saved/                        # 학습된 ML 모델 및 파라미터
 ├── data/storage/                        # SQLite 데이터베이스 파일
 ├── train_models.py                      # ML 모델 재학습 스크립트
@@ -155,7 +157,7 @@ KRX 전체 상장 종목
        예측 의미: 향후 5거래일 크로스섹셔널 순위 (0=최하위, 50=평균, 100=최상위)
 
 3단계  뉴스 감성 분석              → sentiment_score (-100–100)
-       Naver News API (display=30, 중복 제거 후 고유 기사 확보)
+       Naver News API (display=50, 중복 제거 후 고유 기사 확보)
        + DART 공시 API (최근 30일, 유상증자·합병·수주 등 공식 공시)
        지수 감쇠 시간 가중치 적용 (오늘=1.00 / 7일 전=0.09)
        → GPT-4o-mini 감성 분석 (temperature=0.1)
@@ -561,6 +563,14 @@ koreanstocks train
 python train_models.py
 ```
 
+### 추천 성과 추적
+
+```bash
+koreanstocks outcomes          # 미검증 추천 결과 업데이트 + 통계 출력
+koreanstocks outcomes --days 180  # 최근 180일 성과 조회
+koreanstocks outcomes --no-record  # DB 업데이트 없이 통계만 출력
+```
+
 ### 앱 실행
 
 ```bash
@@ -621,7 +631,7 @@ NAVER_CLIENT_SECRET
 |----|-----|----------|
 | **Dashboard** | `/dashboard` | 시장 지수, Portfolio 요약, 날짜별 AI 추천 리포트, 추천 지속성 히트맵 |
 | **Watchlist** | `/dashboard#watchlist` | 관심 종목 등록/삭제, 실시간 심층 분석, 분석 이력 타임라인 |
-| **AI 추천** | `/dashboard#recommendations` | 테마·시장별 추천 생성, 날짜 선택 히스토리, 추천 지속성 히트맵 |
+| **AI 추천** | `/dashboard#recommendations` | 테마·시장별 추천 생성, 날짜 선택 히스토리, 추천 지속성 히트맵, 📊 추천 성과 추적 (5·10·20거래일 승률·목표가 달성률) |
 | **백테스트** | `/dashboard#backtest` | RSI/MACD/COMPOSITE 전략 시뮬레이션, B&H 비교 차트, 초보자 해석 가이드 |
 | **설정** | `/dashboard#settings` | 수동 자동화 실행, 텔레그램 설정 상태 확인 |
 | **브리핑** | `/` | Reveal.js 일일 슬라이드 (종목별 점수·뉴스·AI 의견) |
