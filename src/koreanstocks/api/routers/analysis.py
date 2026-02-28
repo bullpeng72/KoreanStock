@@ -21,10 +21,19 @@ def _run_async(code: str, name: str):
 
 def _resolve_name(code: str, dp) -> str:
     stock_list = dp.get_stock_list()
-    if "code" not in stock_list.columns:
-        return code
-    row = stock_list[stock_list["code"] == code]
-    return row.iloc[0]["name"] if not row.empty else code
+    if "code" in stock_list.columns:
+        row = stock_list[stock_list["code"] == code]
+        if not row.empty:
+            return row.iloc[0]["name"]
+    # FDR 실패 시 pykrx 폴백
+    try:
+        from pykrx import stock as pykrx_stock
+        name = pykrx_stock.get_market_ticker_name(code)
+        if name:
+            return name
+    except Exception as e:
+        logger.warning(f"PyKrx 종목명 조회 실패 [{code}]: {e}")
+    return code
 
 
 @router.get("/analysis/{code}")

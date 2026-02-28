@@ -299,9 +299,12 @@ class StockDataProvider:
         거래일엔 KOSPI 종목 코드 목록(수백 개) 반환.
         get_market_ohlcv()는 비거래일에 이전 거래일 데이터를 반환하는 경우가 있어 사용 안 함.
         """
+        now = datetime.now()
+        if now.weekday() >= 5:  # 토(5)·일(6) → pykrx 호출 없이 바로 비거래일 반환
+            return False
         try:
             from pykrx import stock as _pykrx
-            today = datetime.now().strftime('%Y%m%d')
+            today = now.strftime('%Y%m%d')
             tickers = _pykrx.get_market_ticker_list(today, market='KOSPI')
             return len(tickers) > 0
         except Exception as e:
