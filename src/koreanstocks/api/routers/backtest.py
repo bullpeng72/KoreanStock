@@ -47,7 +47,7 @@ def run_backtest(
 
             result["dates"] = [str(d.date()) for d in daily_df.index]
             result["cum_returns"]     = daily_df["cum_returns"].round(4).tolist()
-            result["cum_returns_bnh"] = bnh_series.reindex(daily_df.index).fillna(method="ffill").round(4).tolist()
+            result["cum_returns_bnh"] = bnh_series.reindex(daily_df.index).ffill().round(4).tolist()
             result["recent_rows"]     = daily_df.tail(10).reset_index().to_dict(orient="records")
 
             # 각 dict의 date key를 문자열로 변환

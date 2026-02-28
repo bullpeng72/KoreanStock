@@ -37,8 +37,20 @@ class StockDataProvider:
             # KRX 전체 종목 리스트를 가져오는 것이 더 안정적입니다.
             # 하지만, KRX Listing에는 Sector/Industry 정보가 불충분할 수 있으므로 KOSPI/KOSDAQ를 따로 가져와 병합
 
-            kospi_df = self._normalize_market_df(fdr.StockListing('KOSPI'), 'KOSPI')
-            kosdaq_df = self._normalize_market_df(fdr.StockListing('KOSDAQ'), 'KOSDAQ')
+            # 일시적 네트워크/API 오류에 대한 재시도 (최대 3회, 지수 백오프)
+            last_exc = None
+            for _attempt in range(3):
+                try:
+                    kospi_df = self._normalize_market_df(fdr.StockListing('KOSPI'), 'KOSPI')
+                    kosdaq_df = self._normalize_market_df(fdr.StockListing('KOSDAQ'), 'KOSDAQ')
+                    last_exc = None
+                    break
+                except Exception as _e:
+                    last_exc = _e
+                    if _attempt < 2:
+                        time.sleep(2 ** _attempt)  # 1s, 2s
+            if last_exc is not None:
+                raise last_exc
 
             # 두 데이터프레임을 합치기
             df = pd.concat([kospi_df, kosdaq_df], ignore_index=True)
@@ -111,7 +123,17 @@ class StockDataProvider:
                     start_dt = end_dt - timedelta(days=365)
                 start = start_dt.strftime('%Y-%m-%d')
 
-            df = fdr.DataReader(code, start, end)
+            try:
+                df = fdr.DataReader(code, start, end)
+            except ValueError as _ve:
+                # FDR/pykrx 내부 월 경계 날짜 계산 버그 (e.g. Feb 31)
+                # start를 +1일 조정 후 재시도
+                if 'day is out of range' in str(_ve):
+                    adjusted = (datetime.strptime(start, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
+                    logger.debug(f"[{code}] 날짜 경계 버그 재시도: {start} → {adjusted}")
+                    df = fdr.DataReader(code, adjusted, end)
+                else:
+                    raise
             if df.empty:
                 return df
 
@@ -127,7 +149,11 @@ class StockDataProvider:
             self._ohlcv_cache[cache_key] = (now, df)
             return df
         except Exception as e:
-            logger.error(f"Error fetching OHLCV for {code}: {e}")
+            # FDR/pykrx의 월 경계 날짜 버그는 WARNING으로 처리 (분석은 중립값으로 계속)
+            if 'day is out of range' in str(e):
+                logger.warning(f"[{code}] OHLCV 날짜 범위 조회 실패 (FDR 월 경계 버그): {e}")
+            else:
+                logger.error(f"Error fetching OHLCV for {code}: {e}")
             return pd.DataFrame()
 
     def get_market_indices(self) -> Dict[str, float]:
@@ -138,20 +164,22 @@ class StockDataProvider:
                 return self._market_cache
 
         indices = {}
-        try:
-            # KOSPI, KOSDAQ, USD/KRW
-            for symbol, name in [('KS11', 'KOSPI'), ('KQ11', 'KOSDAQ'), ('USD/KRW', 'USD_KRW')]:
-                df = fdr.DataReader(symbol, (now - timedelta(days=5)).strftime('%Y-%m-%d'))
+        start_str = (now - timedelta(days=5)).strftime('%Y-%m-%d')
+        for symbol, name in [('KS11', 'KOSPI'), ('KQ11', 'KOSDAQ'), ('USD/KRW', 'USD_KRW')]:
+            try:
+                df = fdr.DataReader(symbol, start_str)
                 if not df.empty:
                     indices[name] = float(df.iloc[-1]['Close'])
                     indices[f"{name}_change"] = float(df.iloc[-1].get('Change', 0.0))
-            
+            except Exception as e:
+                # LOGOUT: FDR KRX 세션 만료 (일시적, 자동 갱신됨) — WARNING으로 처리
+                log = logger.warning if str(e).strip() in ('LOGOUT', 'LOGIN') else logger.error
+                log(f"Error fetching market indices [{symbol}]: {e}")
+
+        if indices:
             self._market_cache = indices
             self._market_timestamp = now
-            return indices
-        except Exception as e:
-            logger.error(f"Error fetching market indices: {e}")
-            return {}
+        return indices
 
     def get_market_ranking(self, limit: int = 50, market: str = 'ALL') -> List[str]:
         """거래량 및 등락률 상위 종목 코드를 취합하여 반환 (market: 'ALL'|'KOSPI'|'KOSDAQ')"""
