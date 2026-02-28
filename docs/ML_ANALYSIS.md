@@ -1,6 +1,6 @@
 # ML 분석 시스템 기술 문서
 
-> Korean Stocks AI/ML Analysis System `v0.2.8`
+> Korean Stocks AI/ML Analysis System `v0.2.9`
 > 최종 업데이트: 2026-02-28
 
 ---
