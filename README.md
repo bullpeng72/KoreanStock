@@ -1,6 +1,6 @@
 # 📈 Korean Stocks AI/ML Analysis System
 
-![version](https://img.shields.io/badge/version-0.2.7-blue)
+![version](https://img.shields.io/badge/version-0.2.8-blue)
 
 > **KOSPI · KOSDAQ 종목을 AI와 머신러닝으로 분석하는 자동화 투자 보조 플랫폼**
 
@@ -74,7 +74,7 @@ KoreanStocks/
 ├── requirements.txt                     # 개발/테스트 전용 (pytest 등)
 ├── src/
 │   └── koreanstocks/
-│       ├── __init__.py                  # VERSION = "0.2.7"
+│       ├── __init__.py                  # VERSION = "0.2.8"
 │       ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init/sync/home/outcomes)
 │       ├── api/
 │       │   ├── app.py                   # FastAPI 앱 팩토리, StaticFiles 마운트
