@@ -34,12 +34,16 @@ def add_to_watchlist(body: WatchlistAdd, db=Depends(get_db), dp=Depends(get_data
         if not row.empty:
             name = row.iloc[0]["name"]
         else:
-            # FDR StockListing 실패 시 PyKrx로 폴백
-            try:
-                from pykrx import stock as pykrx_stock
-                name = pykrx_stock.get_market_ticker_name(body.code) or body.code
-            except Exception as e:
-                logger.warning(f"PyKrx 종목명 조회 실패 [{body.code}]: {e}")
+            # 1차 폴백: 로컬 DB stocks 테이블 (오프라인·비거래일 안전)
+            name = db.get_stock_name(body.code)
+            if not name:
+                # 2차 폴백: PyKrx
+                try:
+                    from pykrx import stock as pykrx_stock
+                    name = pykrx_stock.get_market_ticker_name(body.code) or ""
+                except Exception as e:
+                    logger.warning(f"PyKrx 종목명 조회 실패 [{body.code}]: {e}")
+            if not name:
                 name = body.code
     db.add_to_watchlist(body.code, name)
     return {"code": body.code, "name": name}

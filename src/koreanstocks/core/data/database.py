@@ -304,6 +304,13 @@ class DatabaseManager:
         dates = self.get_recommendation_dates(limit=1)
         return dates[0] if dates else None
 
+    def get_stock_name(self, code: str) -> Optional[str]:
+        """로컬 DB에서 종목명 조회 (오프라인 폴백용)"""
+        with self.get_connection() as conn:
+            cursor = conn.execute("SELECT name FROM stocks WHERE code = ? LIMIT 1", (code,))
+            row = cursor.fetchone()
+            return row[0] if row and row[0] else None
+
     def save_stocks(self, df: pd.DataFrame):
         """종목 리스트 저장"""
         if df.empty: return

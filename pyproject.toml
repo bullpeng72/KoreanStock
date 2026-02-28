@@ -37,6 +37,7 @@ dependencies = [
     "pandas>=2.2,<4",
     "scikit-learn>=1.6,<2",
     "xgboost>=2,<4",
+    "setuptools>=69",
     "pykrx>=1.0.45",
     "finance-datareader>=0.9.50",
     "ta>=0.11",
