@@ -96,7 +96,7 @@ df_all['target'] = (
 | 모멘텀 팩터 (4) | `return_1m` | 20일 수익률 |
 | | `return_3m` | 60일 수익률 |
 | | `high_52w_ratio` | 종가 / 52주 고점 |
-| | `mom_accel` | return_1m − return_3m / 3 |
+| | `mom_accel` | return_1m − (return_3m / 3) |
 | 시장 상대강도 (2) | `rs_vs_mkt_1m` | return_1m − 벤치마크 return_1m |
 | | `rs_vs_mkt_3m` | return_3m − 벤치마크 return_3m |
 
