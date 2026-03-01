@@ -242,10 +242,73 @@
         <button class="btn btn-secondary btn-sm" onclick="toggleEl('strategy-desc')">
           📖 전략 설명 보기
         </button>
-        <div class="toggle-content" id="strategy-desc" style="margin-top:12px;padding:14px;background:var(--bg-dark);border-radius:8px;font-size:.84em;line-height:1.8">
-          <strong>🌡️ RSI</strong> — RSI &lt; 40 매수 / &gt; 60 매도 (과매도/과매수 역추세)<br>
-          <strong>📉 MACD</strong> — MACD 골든크로스 매수 / 데드크로스 매도 (추세 추종)<br>
-          <strong>🔐 COMPOSITE</strong> — RSI &lt; 50 <em>그리고</em> MACD 골든크로스일 때만 매수 (신중한 복합 전략)
+        <div class="toggle-content" id="strategy-desc" style="margin-top:12px;font-size:.84em">
+          <!-- RSI -->
+          <div style="padding:14px 16px;background:var(--bg-dark);border-radius:8px;margin-bottom:10px;border-left:3px solid #f59e0b">
+            <div style="font-weight:700;font-size:1em;margin-bottom:6px">🌡️ RSI 전략 — 역추세 (과매도/과매수 반전)</div>
+            <div style="color:var(--text-muted);margin-bottom:8px;line-height:1.6">
+              <strong>RSI</strong>란? 0~100 사이 숫자로, 최근 14일간 "오른 날의 힘" vs "내린 날의 힘"을 비교한 지표입니다.<br>
+              값이 낮을수록 최근 하락이 심했다는 뜻이고, 높을수록 과열됐다는 신호입니다.
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+              <div style="background:rgba(34,197,94,.08);border-radius:6px;padding:8px 10px">
+                <span style="color:#22c55e;font-weight:600">▲ 매수</span> — RSI &lt; 40<br>
+                <span style="color:var(--text-muted)">너무 많이 떨어졌으니 반등을 기대하고 진입</span>
+              </div>
+              <div style="background:rgba(239,68,68,.08);border-radius:6px;padding:8px 10px">
+                <span style="color:#ef4444;font-weight:600">▼ 매도</span> — RSI &gt; 60<br>
+                <span style="color:var(--text-muted)">너무 많이 올랐으니 차익 실현 후 청산</span>
+              </div>
+            </div>
+            <div style="color:var(--text-muted);font-size:.93em">
+              💡 <em>횡보장·박스권에서 효과적입니다. 강한 하락 추세 중에는 RSI가 낮아도 계속 내릴 수 있으니 주의하세요.</em>
+            </div>
+          </div>
+
+          <!-- MACD -->
+          <div style="padding:14px 16px;background:var(--bg-dark);border-radius:8px;margin-bottom:10px;border-left:3px solid #6366f1">
+            <div style="font-weight:700;font-size:1em;margin-bottom:6px">📉 MACD 전략 — 추세 추종 (골든/데드크로스)</div>
+            <div style="color:var(--text-muted);margin-bottom:8px;line-height:1.6">
+              <strong>MACD</strong>란? 단기(12일) 이동평균 − 장기(26일) 이동평균의 차이입니다.<br>
+              이 값의 9일 평균(시그널선)과 교차하는 시점으로 추세 전환을 포착합니다.
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+              <div style="background:rgba(34,197,94,.08);border-radius:6px;padding:8px 10px">
+                <span style="color:#22c55e;font-weight:600">▲ 매수</span> — 골든크로스<br>
+                <span style="color:var(--text-muted)">MACD선이 시그널선을 <em>위로</em> 돌파 → 상승 추세 시작</span>
+              </div>
+              <div style="background:rgba(239,68,68,.08);border-radius:6px;padding:8px 10px">
+                <span style="color:#ef4444;font-weight:600">▼ 매도</span> — 데드크로스<br>
+                <span style="color:var(--text-muted)">MACD선이 시그널선을 <em>아래로</em> 이탈 → 하락 추세 전환</span>
+              </div>
+            </div>
+            <div style="color:var(--text-muted);font-size:.93em">
+              💡 <em>추세가 뚜렷한 상승장에서 효과적입니다. 신호가 약간 늦게 나오지만 잡음(false signal)이 적습니다.</em>
+            </div>
+          </div>
+
+          <!-- COMPOSITE -->
+          <div style="padding:14px 16px;background:var(--bg-dark);border-radius:8px;border-left:3px solid #10b981">
+            <div style="font-weight:700;font-size:1em;margin-bottom:6px">🔐 COMPOSITE 전략 — 이중 필터 (신중한 복합 진입)</div>
+            <div style="color:var(--text-muted);margin-bottom:8px;line-height:1.6">
+              RSI와 MACD를 <strong>동시에</strong> 확인하는 이중 안전장치 전략입니다.<br>
+              두 조건이 모두 충족될 때만 매수하므로 거래 횟수는 줄지만 진입 정확도가 높아집니다.
+            </div>
+            <div style="background:rgba(16,185,129,.08);border-radius:6px;padding:10px 12px;margin-bottom:8px">
+              <span style="color:#10b981;font-weight:600">▲ 매수 조건 (둘 다 만족해야 진입)</span><br>
+              <span style="color:var(--text-muted)">
+                조건 1. RSI &lt; 50 — 현재 가격이 최근 평균보다 낮아 저평가 상태<br>
+                조건 2. MACD 골든크로스 — 하락세가 꺾이고 상승 모멘텀 확인
+              </span>
+            </div>
+            <div style="background:rgba(239,68,68,.08);border-radius:6px;padding:10px 12px;margin-bottom:8px">
+              <span style="color:#ef4444;font-weight:600">▼ 매도 조건</span><br>
+              <span style="color:var(--text-muted)">MACD 데드크로스 발생 또는 RSI &gt; 60 도달 시 청산</span>
+            </div>
+            <div style="color:var(--text-muted);font-size:.93em">
+              💡 <em>"저점에서 추세 전환 확인 후 진입"하는 전략입니다. 신호가 드물게 발생하므로 장기 보유에 적합합니다.</em>
+            </div>
+          </div>
         </div>
       </div>
 

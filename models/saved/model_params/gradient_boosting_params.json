@@ -17,9 +17,9 @@
   "test_logloss": 0.6871,
   "overfit_gap": 0.0914,
   "quality_pass": true,
-  "training_duration": 49.8,
-  "saved_at": "2026-03-01T23:57:52.395297",
-  "model_version": "gradient_boosting_v20260301_235752",
+  "training_duration": 47.2,
+  "saved_at": "2026-03-02T00:29:56.064319",
+  "model_version": "gradient_boosting_v20260302_002956",
   "feature_importances": [
     [
       "atr_ratio",

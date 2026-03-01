@@ -21,9 +21,9 @@
   "test_logloss": 0.6865,
   "overfit_gap": 0.0764,
   "quality_pass": true,
-  "training_duration": 1.7,
-  "saved_at": "2026-03-01T23:57:54.143549",
-  "model_version": "xgboost_v20260301_235754",
+  "training_duration": 1.2,
+  "saved_at": "2026-03-02T00:29:57.266443",
+  "model_version": "xgboost_v20260302_002957",
   "feature_importances": [
     [
       "vix_change_5d",

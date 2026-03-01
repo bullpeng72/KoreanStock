@@ -53,7 +53,6 @@ def _build_env_template(keys: dict) -> str:
 
 app = typer.Typer(
     name="koreanstocks",
-    help="KOSPI·KOSDAQ 종목 자동 스크리닝 + 텔레그램 리포트 플랫폼",
     add_completion=False,
     rich_markup_mode="rich",
     invoke_without_command=True,   # 서브커맨드 없이 실행 가능
@@ -89,19 +88,59 @@ def main(
     [dim]KOSPI·KOSDAQ 종목을 기술적 지표, ML 앙상블, 뉴스 감성 분석으로
     자동 스크리닝하고 텔레그램 리포트를 발송합니다.[/dim]
 
+    ────────────────────────────────────────────────
+
+    [bold]분석 파이프라인:[/bold]
+
+      [cyan]1단계[/cyan]  기술적 지표  →  tech_score  [dim](RSI·MACD·BB·ADX·CMF 등, 0~100)[/dim]
+      [cyan]2단계[/cyan]  ML 앙상블    →  ml_score    [dim](RF+GB+XGB, 10거래일 후 상위 25% 확률, 0~100)[/dim]
+      [cyan]3단계[/cyan]  뉴스 감성    →  sentiment   [dim](Naver 뉴스 + GPT-4o-mini, -100~+100)[/dim]
+      [cyan]4단계[/cyan]  AI 종합      →  BUY/HOLD/SELL + 목표가
+
+    [dim]  종합점수 = tech×0.40 + ml×0.35 + sentiment_norm×0.25[/dim]
+
+    ────────────────────────────────────────────────
+
     [bold]빠른 시작:[/bold]
 
-    [green]  koreanstocks init[/green]       [dim]# .env 설정 파일 생성[/dim]
-    [green]  koreanstocks sync[/green]       [dim]# GitHub에서 최신 분석 DB 다운로드[/dim]
-    [green]  koreanstocks serve[/green]      [dim]# 웹 대시보드 실행 (브라우저 자동 열림)[/dim]
-    [green]  koreanstocks recommend[/green]  [dim]# 오늘의 추천 종목 분석[/dim]
-    [green]  koreanstocks analyze 005930[/green]  [dim]# 삼성전자 단일 분석[/dim]
+    [green]  koreanstocks init[/green]            [dim]# .env 설정 파일 대화형 생성[/dim]
+    [green]  koreanstocks sync[/green]            [dim]# GitHub에서 최신 분석 DB 다운로드[/dim]
+    [green]  koreanstocks serve[/green]           [dim]# 웹 대시보드 실행 (브라우저 자동 열림)[/dim]
+    [green]  koreanstocks recommend[/green]       [dim]# 오늘의 추천 종목 분석 + 텔레그램 발송[/dim]
+    [green]  koreanstocks analyze 005930[/green]  [dim]# 삼성전자 단일 심층 분석[/dim]
+    [green]  koreanstocks train[/green]           [dim]# ML 모델 재학습[/dim]
+    [green]  koreanstocks outcomes[/green]        [dim]# 추천 결과 성과 추적 (5·10·20거래일)[/dim]
 
-    서브커맨드 상세 도움말: [cyan]koreanstocks [커맨드] --help[/cyan]
+    ────────────────────────────────────────────────
+
+    [bold]환경변수 (.env 필수 항목):[/bold]
+
+      [yellow]OPENAI_API_KEY[/yellow]       GPT-4o-mini 뉴스 감성·AI 의견 생성
+      [yellow]NAVER_CLIENT_ID/SECRET[/yellow]  네이버 뉴스 API
+      [yellow]TELEGRAM_BOT_TOKEN[/yellow]   텔레그램 리포트 발송
+      [yellow]TELEGRAM_CHAT_ID[/yellow]     수신 채팅방 ID
+
+    커맨드별 상세 도움말: [cyan]koreanstocks [커맨드] --help[/cyan]
     """
-    # 서브커맨드 없이 실행됐을 때만 도움말 출력
+    # 서브커맨드 없이 실행됐을 때는 간단한 요약만 출력
     if ctx.invoked_subcommand is None:
-        typer.echo(ctx.get_help())
+        try:
+            import importlib.metadata
+            ver = importlib.metadata.version("koreanstocks")
+        except Exception:
+            from koreanstocks import VERSION
+            ver = VERSION
+        typer.echo(
+            f"KoreanStocks v{ver} — AI/ML 기반 한국 주식 분석 플랫폼\n"
+            "\n"
+            "  koreanstocks init       # 초기 설정 (.env 생성)\n"
+            "  koreanstocks sync       # 최신 분석 DB 다운로드\n"
+            "  koreanstocks serve      # 웹 대시보드 실행\n"
+            "  koreanstocks recommend  # 오늘의 추천 종목 분석\n"
+            "  koreanstocks analyze 005930  # 단일 종목 심층 분석\n"
+            "\n"
+            "자세한 도움말: koreanstocks --help"
+        )
         raise typer.Exit()
 
 
