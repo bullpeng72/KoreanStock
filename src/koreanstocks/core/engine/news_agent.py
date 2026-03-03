@@ -149,10 +149,13 @@ class NewsAgent:
         if filtered and removed:
             logger.debug(f"[계열사 필터] {stock_name}: {removed}건 제거 ({len(filtered)}건 유지)")
 
-        # 결과가 너무 적으면 원본 유지 (소형주·짧은 종목명 방어)
-        # 3건 미만일 때만 fallback — 3건 이상이면 관련성 높은 기사만 활용하는 것이 품질상 유리
-        if len(filtered) < 3:
-            logger.debug(f"[계열사 필터] {stock_name}: 필터 후 {len(filtered)}건 미만 → fallback")
+        # fallback: 아예 0건일 때만 원본 반환 (짧은 종목명·소형주 방어)
+        # ※ 1건 이상이면 관련성 높은 기사만 사용 — 관련 없는 기사 다수보다 품질상 유리
+        # ※ 증권사처럼 타사 리포트 발행자로 본문에 언급되는 종목은 쿼리 특성상
+        #   필터 후 기사 수가 적을 수 있으나, 관련 없는 기사로 감성 분석을 오염시키지 않도록
+        #   0건일 때만 원본으로 fallback한다
+        if len(filtered) == 0:
+            logger.debug(f"[계열사 필터] {stock_name}: 필터 후 0건 → fallback")
             return items
         return filtered
 

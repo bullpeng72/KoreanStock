@@ -118,7 +118,7 @@ class StockPredictionModel:
         """시장 지수 수익률 DataFrame 반환 (KS11=KOSPI, KQ11=KOSDAQ, 당일 캐싱).
 
         컬럼: return_1m (20d), return_3m (60d) — 인덱스: 날짜
-        FDR 실패 시 yfinance(^KS11/^KQ11) 폴백.
+        FDR Yahoo Finance 경유 (^ 접두사 강제) → 실패 시 yfinance 폴백.
         """
         from datetime import date as _date
         from koreanstocks.core.data.provider import data_provider as _dp
@@ -126,9 +126,10 @@ class StockPredictionModel:
         cached = self._market_cache.get(index_symbol, {})
         if cached.get('date') == today and not cached.get('df', pd.DataFrame()).empty:
             return cached['df']
-        # FDR 1차 시도
+        # FDR 1차 시도 — '^' 접두사로 Yahoo Finance 경유 강제 (KRX 직접 접근 차단 회피)
+        yf_sym_primary = {'KS11': '^KS11', 'KQ11': '^KQ11'}.get(index_symbol, f'^{index_symbol}')
         try:
-            raw = _dp.get_ohlcv(index_symbol, period='2y')
+            raw = _dp.get_ohlcv(yf_sym_primary, period='2y')
             if not raw.empty:
                 mkt = pd.DataFrame(index=raw.index)
                 mkt['return_1m'] = raw['close'].pct_change(20)
@@ -136,7 +137,7 @@ class StockPredictionModel:
                 self._market_cache[index_symbol] = {'df': mkt, 'date': today}
                 return mkt
         except Exception as e:
-            logger.warning(f"Failed to fetch {index_symbol} via FDR: {e}")
+            logger.warning(f"Failed to fetch {yf_sym_primary} via FDR: {e}")
         # yfinance 폴백
         yf_map = {'KS11': '^KS11', 'KQ11': '^KQ11'}
         yf_sym = yf_map.get(index_symbol)

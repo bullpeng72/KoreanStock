@@ -189,7 +189,7 @@ class AnalysisAgent:
                             {"role": "user", "content": prompt},
                         ],
                         response_format={"type": "json_object"},
-                        temperature=0.3,
+                        temperature=0.1,
                         max_tokens=600,
                     )
                     result = json.loads(response.choices[0].message.content)

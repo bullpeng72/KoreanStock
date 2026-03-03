@@ -1,11 +1,13 @@
 import pandas as pd
 import numpy as np
 import FinanceDataReader as fdr
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as _FuturesTimeout
 from datetime import datetime, timedelta, date as date_type
 import logging
 import time
 from functools import lru_cache
 from typing import List, Dict, Optional
+
 from koreanstocks.core.config import config
 
 logger = logging.getLogger(__name__)
@@ -24,9 +26,35 @@ def _get_kr_holidays(year: int):
     import holidays
     return holidays.country_holidays('KR', years=year)
 
+
+# ── 시장 API 불가 시 정적 유동성 종목 풀 (최후 폴백) ─────────────────────
+# FDR StockListing 및 KIND API 조회가 모두 실패할 때 사용.
+# KOSPI200 + KOSDAQ 유동성 상위 기준 선별.
+_STATIC_KOSPI_POOL: List[str] = [
+    '005930', '000660', '373220', '207940', '005380', '000270', '005490',
+    '051910', '068270', '035720', '035420', '006400', '012330', '105560',
+    '055550', '086790', '316140', '017670', '030200', '066570', '096770',
+    '010950', '015760', '033780', '090430', '051900', '028260', '000810',
+    '009150', '034220', '047810', '138040', '006800', '079550', '086280',
+    '128940', '000100', '006280', '003550', '009830', '034020', '139480',
+    '282330', '097950', '000120', '071050', '000240', '004020', '030000',
+    '004370', '271560', '326030', '352820', '259960', '036570', '251270',
+    '035250', '078930', '023530', '011170', '010130', '024110', '180640',
+    '003490', '016360', '018880', '042660', '011200', '000080',
+]
+_STATIC_KOSDAQ_POOL: List[str] = [
+    '247540', '086520', '028300', '293490', '091990', '058470', '357780',
+    '240810', '263750', '145020', '214150', '277810', '403870', '196180',
+    '048260', '196170', '035900', '383220', '041510', '095660', '039030',
+    '178920', '014680', '237690', '041830', '036930', '096530', '086900',
+    '090460',
+]
+_STATIC_STOCK_POOL: List[str] = _STATIC_KOSPI_POOL + _STATIC_KOSDAQ_POOL
+
+
 class StockDataProvider:
     """한국 시장 주식 데이터 수집을 담당하는 클래스"""
-    
+
     def __init__(self):
         self._krx_cache = None
         self._krx_timestamp = None
@@ -34,6 +62,8 @@ class StockDataProvider:
         self._market_cache = None
         self._market_timestamp = None
         self._ohlcv_cache: Dict[str, tuple] = {}  # key: "code_period" → (timestamp, df)
+        self._volume_cache: Optional[pd.DataFrame] = None  # 전종목 거래량+등락률 캐시
+        self._volume_timestamp: Optional[datetime] = None  # 캐시 생성 시각
 
     @staticmethod
     def _normalize_market_df(df: pd.DataFrame, market_name: str) -> pd.DataFrame:
@@ -43,22 +73,26 @@ class StockDataProvider:
         return df
 
     def get_stock_list(self) -> pd.DataFrame:
-        """KOSPI, KOSDAQ 상장 종목 리스트를 반환 (캐싱 적용)"""
+        """KOSPI, KOSDAQ 상장 종목 리스트를 반환 (캐싱 적용).
+
+        수집 우선순위:
+          1차 — FDR StockListing('KOSPI'/'KOSDAQ')  [data.krx.co.kr]
+          2차 — KIND API (kind.krx.co.kr)           [KRX 세션 인증 우회 가능]
+        """
         now = datetime.now()
         if self._krx_cache is not None and self._krx_timestamp:
             if (now - self._krx_timestamp).total_seconds() < config.CACHE_EXPIRE_STOCKS:
                 return self._krx_cache
 
-        # 최근 5분 이내 실패한 경우 KRX API 재시도 차단 (반복 오류 방지)
+        # FDR 실패 쿨다운 중: 캐시 우선, 없으면 KIND 직접 시도
         if self._krx_fail_timestamp:
             if (now - self._krx_fail_timestamp).total_seconds() < 300:
-                return self._krx_cache if self._krx_cache is not None else pd.DataFrame(columns=['code', 'name', 'market', 'sector', 'industry'])
+                if self._krx_cache is not None:
+                    return self._krx_cache
+                return self._fetch_kind_stock_list(now)
 
+        # ── 1차: FDR StockListing (최대 3회 재시도) ──────────────────
         try:
-            # KRX 전체 종목 리스트를 가져오는 것이 더 안정적입니다.
-            # 하지만, KRX Listing에는 Sector/Industry 정보가 불충분할 수 있으므로 KOSPI/KOSDAQ를 따로 가져와 병합
-
-            # 일시적 네트워크/API 오류에 대한 재시도 (최대 3회, 지수 백오프)
             last_exc = None
             for _attempt in range(3):
                 try:
@@ -73,47 +107,214 @@ class StockDataProvider:
             if last_exc is not None:
                 raise last_exc
 
-            # 두 데이터프레임을 합치기
             df = pd.concat([kospi_df, kosdaq_df], ignore_index=True)
-
-            # 컬럼명 표준화 (market은 이미 처리했으므로 제외)
             column_mapping = {
-                'Code': 'code',
-                'Name': 'name',
-                'Sector': 'sector',
-                'Industry': 'industry',
-                'Dept': 'dept',
+                'Code': 'code', 'Name': 'name',
+                'Sector': 'sector', 'Industry': 'industry', 'Dept': 'dept',
             }
-
             df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
-            
-            # 필수 컬럼이 없을 경우 빈 값으로 생성
             for col in ['sector', 'industry', 'market']:
                 if col not in df.columns:
                     df[col] = ''
-            
-            # 'market' 컬럼이 이미 추가되었으므로 중복 처리 방지
-            # KOSPI/KOSDAQ 필터링은 이미 데이터 병합 시에 이루어짐
-            
-            # 필요한 컬럼만 최종 선택
             final_columns = ['code', 'name', 'market', 'sector', 'industry']
-            df = df[[col for col in final_columns if col in df.columns]] # 존재하는 컬럼만 선택
-            
-            # 누락된 컬럼 다시 채워넣기 (예: KRX에는 Sector/Industry가 없는 경우가 있으므로)
+            df = df[[col for col in final_columns if col in df.columns]]
             for col in ['sector', 'industry']:
                 if col not in df.columns:
                     df[col] = ''
-            
-            # 중복 종목 제거 (Code 기준)
             df = df.drop_duplicates(subset=['code'])
-
             self._krx_cache = df
             self._krx_timestamp = now
             return df
         except Exception as e:
-            self._krx_fail_timestamp = now  # 5분간 재시도 차단
-            logger.error(f"Error fetching stock list: {e}")
-            return self._krx_cache if self._krx_cache is not None else pd.DataFrame(columns=['code', 'name', 'market', 'sector', 'industry'])
+            self._krx_fail_timestamp = now  # 5분간 FDR 재시도 차단
+            logger.error(f"Error fetching stock list (FDR): {e}")
+
+        # ── 2차: KIND API 폴백 ────────────────────────────────────────
+        return self._fetch_kind_stock_list(now)
+
+    def _fetch_kind_stock_list(self, now: datetime = None) -> pd.DataFrame:
+        """KIND API(kind.krx.co.kr) — FDR 실패 시 폴백.
+
+        KRX data.krx.co.kr이 세션 인증을 강화해 LOGOUT을 반환할 때,
+        KIND는 세션 없이 Excel 형태로 전종목 목록을 제공합니다.
+        컬럼: code, name, market(KOSPI/KOSDAQ), sector, industry
+        """
+        import requests
+        from io import BytesIO
+
+        if now is None:
+            now = datetime.now()
+        _empty = pd.DataFrame(columns=['code', 'name', 'market', 'sector', 'industry'])
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            url = 'http://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13'
+            r = requests.get(url, headers=headers, timeout=15)
+            r.raise_for_status()
+            df_raw = pd.read_html(BytesIO(r.content), encoding='euc-kr')[0]
+            # 시장 구분: 유가(증권) → KOSPI, 코스닥 → KOSDAQ
+            market_map = {'유가': 'KOSPI', '코스닥': 'KOSDAQ'}
+            df_raw['market'] = df_raw['시장구분'].map(market_map)
+            df_raw = df_raw.dropna(subset=['market'])  # KONEX 등 제외
+            df_raw = df_raw.rename(columns={
+                '종목코드': 'code', '회사명': 'name', '업종': 'sector',
+            })
+            df_raw['code'] = df_raw['code'].astype(str).str.zfill(6)
+            if '주요제품' in df_raw.columns:
+                df_raw['industry'] = df_raw['주요제품'].fillna('')
+            else:
+                df_raw['industry'] = ''
+            df = df_raw[['code', 'name', 'market', 'sector', 'industry']].copy()
+            df = df.drop_duplicates(subset=['code']).reset_index(drop=True)
+            logger.info(f"KIND API 폴백 성공: {len(df)}종목 (KOSPI+KOSDAQ)")
+            self._krx_cache = df
+            self._krx_timestamp = now
+            return df
+        except Exception as e:
+            logger.error(f"KIND API 폴백 실패: {e}")
+            return self._krx_cache if self._krx_cache is not None else _empty
+
+    # ── 거래량·등락률 수집 (KRX 차단 대응) ──────────────────────────────
+
+    def _get_volume_change_df(self, valid_codes: set) -> pd.DataFrame:
+        """당일 전종목 거래량+등락률 DataFrame 반환 (2단계 폴백, 10분 캐시).
+
+        1차 — fdr.StockListing('KRX')           : 실시간 전종목 스냅샷 (KRX 세션 필요)
+        2차 — 종목 풀 개별 DataReader 배치 조회  : KRX 세션 정책 차단 시 Yahoo Finance 경유
+
+        get_market_ranking()과 get_market_buckets()가 동일 세션에서 연속 호출될 때
+        Yahoo Finance 레이트 리밋을 피하기 위해 10분간 결과를 캐싱한다.
+
+        Returns: DataFrame with columns (code, volume, change_pct), or empty DataFrame
+        """
+        # ── 캐시 확인 (10분 TTL) ─────────────────────────────────────
+        now = datetime.now()
+        if (
+            self._volume_cache is not None
+            and self._volume_timestamp is not None
+            and (now - self._volume_timestamp).total_seconds() < 600
+        ):
+            logger.debug("거래량 캐시 히트 — 재조회 생략")
+            return self._volume_cache
+
+        # ── 1차: fdr.StockListing('KRX') ─────────────────────────────
+        try:
+            df = fdr.StockListing('KRX')
+            cols = df.columns.tolist()
+            mapping: Dict[str, str] = {}
+            if 'Code'    in cols: mapping['Code']    = 'code'
+            if 'Volume'  in cols: mapping['Volume']  = 'volume'
+            if 'Chg'     in cols: mapping['Chg']     = 'change_pct'
+            elif 'Changes' in cols: mapping['Changes'] = 'change_pct'
+            df = df.rename(columns=mapping)
+            if 'code' in df.columns and 'volume' in df.columns:
+                keep = ['code', 'volume'] + (['change_pct'] if 'change_pct' in df.columns else [])
+                logger.debug("fdr.StockListing('KRX') 성공")
+                result = df[keep]
+                self._volume_cache = result
+                self._volume_timestamp = datetime.now()
+                return result
+        except Exception as e:
+            logger.warning(
+                f"fdr.StockListing('KRX') 차단 — 개별 DataReader 배치 조회로 전환: {e}"
+            )
+
+        # ── 2차: 개별 DataReader 배치 조회 (KRX 차단 대체) ───────────
+        candidate_pool = self._get_bulk_candidate_pool(valid_codes)
+        logger.info(f"거래량 배치 조회: {len(candidate_pool)}종목 (KRX StockListing 차단 대체)")
+        result = self._fetch_bulk_volume_change(candidate_pool)
+        if not result.empty:
+            self._volume_cache = result
+            self._volume_timestamp = datetime.now()
+        return result
+
+    def _get_bulk_candidate_pool(self, valid_codes: set, max_size: int = 100) -> List[str]:
+        """배치 OHLCV 조회용 종목 풀 구성.
+
+        정적 풀(유동성 상위 97종목)을 기반으로, KIND API 종목 목록에서 보충하여
+        최대 max_size개의 대표 풀을 반환한다.
+        Yahoo Finance 레이트 리밋 감안: 100종목 × 10 workers ≈ 10~20초 내 완료.
+        """
+        pool: List[str] = []
+        seen: set = set()
+        for c in _STATIC_STOCK_POOL:
+            if c in valid_codes and c not in seen:
+                pool.append(c)
+                seen.add(c)
+        if len(pool) < max_size:
+            try:
+                full_list = self.get_stock_list()
+                for c in full_list['code'].tolist():
+                    if c not in seen and c in valid_codes:
+                        pool.append(c)
+                        seen.add(c)
+                        if len(pool) >= max_size:
+                            break
+            except Exception:
+                pass
+        return pool[:max_size]
+
+    def _fetch_bulk_volume_change(
+        self,
+        codes: List[str],
+        max_workers: int = 10,
+        timeout: int = 30,
+    ) -> pd.DataFrame:
+        """종목별 최신 거래량·등락률을 FDR DataReader로 병렬 수집.
+
+        KRX 세션 정책으로 fdr.StockListing('KRX')이 차단될 때 호출된다.
+        최근 14일 OHLCV를 조회하여 최신일 거래량 + 전일 대비 등락률을 계산한다.
+
+        구현 주의:
+          ThreadPoolExecutor 컨텍스트 매니저는 __exit__ 시 shutdown(wait=True)를 호출하여
+          타임아웃 후에도 모든 스레드가 끝날 때까지 블록한다. 이를 방지하기 위해
+          concurrent.futures.wait() + shutdown(wait=False)를 직접 사용한다.
+
+        Returns: DataFrame (code, volume, change_pct)
+        """
+        import concurrent.futures as _cf
+
+        end_str   = datetime.now().strftime('%Y-%m-%d')
+        start_str = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
+
+        def _one(code: str):
+            try:
+                df = fdr.DataReader(code, start_str, end_str)
+                if df is None or df.empty or len(df) < 2:
+                    return None
+                latest   = df.iloc[-1]
+                prev     = df.iloc[-2]
+                vol      = float(latest.get('Volume', 0) or 0)
+                close    = float(latest.get('Close',  0) or 0)
+                prev_cls = float(prev.get('Close',    0) or 0)
+                chg      = (close - prev_cls) / prev_cls * 100.0 if prev_cls else 0.0
+                return {'code': code, 'volume': vol, 'change_pct': round(chg, 2)}
+            except Exception:
+                return None
+
+        results = []
+        pool = ThreadPoolExecutor(max_workers=max_workers)
+        try:
+            futures_map = {pool.submit(_one, c): c for c in codes}
+            done, not_done = _cf.wait(futures_map.keys(), timeout=timeout)
+            for future in done:
+                try:
+                    r = future.result()
+                    if r:
+                        results.append(r)
+                except Exception:
+                    pass
+            if not_done:
+                logger.warning(
+                    f"_fetch_bulk_volume_change: {len(not_done)}건 타임아웃 — {len(results)}건 수집"
+                )
+                for f in not_done:
+                    f.cancel()
+        finally:
+            pool.shutdown(wait=False)  # 잔여 스레드 대기 없이 즉시 반환
+
+        if results:
+            logger.info(f"거래량 배치 조회 완료: {len(results)}/{len(codes)}종목")
+        return pd.DataFrame(results) if results else pd.DataFrame()
 
     def get_ohlcv(self, code: str, start: str = None, end: str = None, period: str = '1y') -> pd.DataFrame:
         """특정 종목의 OHLCV(시가, 고가, 저가, 종가, 거래량) 데이터를 반환 (5분 캐시 적용)"""
@@ -127,7 +328,7 @@ class StockDataProvider:
         try:
             if not end:
                 end = datetime.now().strftime('%Y-%m-%d')
-            
+
             if not start:
                 # period를 바탕으로 start_date 계산
                 end_dt = datetime.now()
@@ -148,7 +349,7 @@ class StockDataProvider:
             try:
                 df = fdr.DataReader(code, start, end)
             except ValueError as _ve:
-                # FDR/pykrx 내부 월 경계 날짜 계산 버그 (e.g. Feb 31)
+                # FDR/KIND 내부 월 경계 날짜 계산 버그 (e.g. Feb 31)
                 # start를 +1일 조정 후 재시도
                 if 'day is out of range' in str(_ve):
                     adjusted = (datetime.strptime(start, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
@@ -171,7 +372,7 @@ class StockDataProvider:
             self._ohlcv_cache[cache_key] = (now, df)
             return df
         except Exception as e:
-            # FDR/pykrx의 월 경계 날짜 버그는 WARNING으로 처리 (분석은 중립값으로 계속)
+            # FDR/KIND의 월 경계 날짜 버그는 WARNING으로 처리 (분석은 중립값으로 계속)
             if 'day is out of range' in str(e):
                 logger.warning(f"[{code}] OHLCV 날짜 범위 조회 실패 (FDR 월 경계 버그): {e}")
             elif str(e).strip() in ('LOGOUT', 'LOGIN'):
@@ -188,17 +389,23 @@ class StockDataProvider:
                 return self._market_cache
 
         indices = {}
-        start_str = (now - timedelta(days=5)).strftime('%Y-%m-%d')
-        for symbol, name in [('KS11', 'KOSPI'), ('KQ11', 'KOSDAQ'), ('USD/KRW', 'USD_KRW')]:
+        start_str = (now - timedelta(days=7)).strftime('%Y-%m-%d')
+        # '^' 접두사 심볼: FDR이 Yahoo Finance 소스를 사용 (KRX 세션 불필요)
+        # 'KS11'/'KQ11'은 FDR KRX 직접 접근으로 LOGOUT 에러 발생 가능
+        for symbol, name in [('^KS11', 'KOSPI'), ('^KQ11', 'KOSDAQ'), ('USD/KRW', 'USD_KRW')]:
             try:
                 df = fdr.DataReader(symbol, start_str)
                 if not df.empty:
                     indices[name] = float(df.iloc[-1]['Close'])
-                    indices[f"{name}_change"] = float(df.iloc[-1].get('Change', 0.0))
+                    # Change 컬럼이 없는 소스(Yahoo Finance)도 있으므로 전일비 직접 계산
+                    if len(df) >= 2:
+                        prev = float(df.iloc[-2]['Close'])
+                        curr = float(df.iloc[-1]['Close'])
+                        indices[f"{name}_change"] = (curr - prev) / prev if prev else 0.0
+                    else:
+                        indices[f"{name}_change"] = float(df.iloc[-1].get('Change', 0.0))
             except Exception as e:
-                # LOGOUT: FDR KRX 세션 만료 (일시적, 자동 갱신됨) — WARNING으로 처리
-                log = logger.warning if str(e).strip() in ('LOGOUT', 'LOGIN') else logger.error
-                log(f"Error fetching market indices [{symbol}]: {e}")
+                logger.error(f"Error fetching market indices [{symbol}]: {e}")
 
         if indices:
             self._market_cache = indices
@@ -209,103 +416,147 @@ class StockDataProvider:
         """거래량 및 등락률 상위 종목 코드를 취합하여 반환 (market: 'ALL'|'KOSPI'|'KOSDAQ')"""
         try:
             full_stock_list = self.get_stock_list()
-            
-            # 현재 시장 랭킹 정보 (거래량, 등락률)
-            df_ranking = fdr.StockListing('KRX') # 최신 거래량/등락률 정보는 KRX 리스팅에서
-            
-            # 컬럼명 존재 여부 확인 및 표준화
-            cols = df_ranking.columns.tolist()
-            mapping = {}
-            if 'Code' in cols: mapping['Code'] = 'code'
-            if 'Volume' in cols: mapping['Volume'] = 'volume'
-            if 'Chg' in cols: mapping['Chg'] = 'change_pct'
-            elif 'Changes' in cols: mapping['Changes'] = 'change_pct' # 버전 차이 대응
-            
-            df_ranking = df_ranking.rename(columns=mapping)
-            
-            # 필수 데이터 확인
-            if 'code' not in df_ranking.columns or 'volume' not in df_ranking.columns:
-                logger.warning("Required columns (Code, Volume) missing in StockListing('KRX').")
-                return df_ranking['Code'].head(limit).tolist() if 'Code' in df_ranking.columns else []
-
-            # 거래량이 있는 종목만 선택
-            df_ranking['volume'] = pd.to_numeric(df_ranking['volume'], errors='coerce').fillna(0)
-            df_ranking = df_ranking[df_ranking['volume'] > 0]
-            
-            # 1. 거래량 상위
-            top_volume = df_ranking.sort_values(by='volume', ascending=False).head(limit)
-            
-            # 2. 상승률 상위 (컬럼이 있을 때만)
-            top_gainers = pd.DataFrame()
-            if 'change_pct' in df_ranking.columns:
-                df_ranking['change_pct'] = pd.to_numeric(df_ranking['change_pct'], errors='coerce').fillna(0)
-                top_gainers = df_ranking.sort_values(by='change_pct', ascending=False).head(limit)
-            
-            # 순위 순서 유지하며 합치기: 거래량 상위 → 그 외 등락률 상위
-            # (set() 사용 시 순서가 소실되어 candidate_codes[:30]이 코드번호 순으로 잘리는 버그 수정)
-            vol_codes  = top_volume['code'].tolist()
-            gain_codes = top_gainers['code'].tolist() if not top_gainers.empty else []
-            seen       = set(vol_codes)
-            ordered_codes = vol_codes + [c for c in gain_codes if c not in seen]
-
-            # 상장 종목 목록에 존재하는 코드만 유지 (비상장·관리종목 제외)
-            # market 파라미터가 지정된 경우 해당 시장 종목만 허용
             if market != 'ALL':
                 valid_codes = set(full_stock_list[full_stock_list['market'] == market]['code'].tolist())
             else:
                 valid_codes = set(full_stock_list['code'].tolist())
-            result = [c for c in ordered_codes if c in valid_codes]
 
-            logger.info(f"Market ranking fetched: {len(result)} candidates (volume+gainers, ordered).")
-            return result
+            # 거래량+등락률 데이터 수집 (KRX 차단 시 배치 DataReader 폴백)
+            df_ranking = self._get_volume_change_df(valid_codes)
+
+            if df_ranking is not None and not df_ranking.empty and 'volume' in df_ranking.columns:
+                df_ranking['volume'] = pd.to_numeric(df_ranking['volume'], errors='coerce').fillna(0)
+                df_ranking = df_ranking[df_ranking['volume'] > 0]
+
+                top_volume  = df_ranking.sort_values(by='volume', ascending=False).head(limit)
+                top_gainers = pd.DataFrame()
+                if 'change_pct' in df_ranking.columns:
+                    df_ranking['change_pct'] = pd.to_numeric(
+                        df_ranking['change_pct'], errors='coerce'
+                    ).fillna(0)
+                    top_gainers = df_ranking.sort_values(by='change_pct', ascending=False).head(limit)
+
+                vol_codes  = top_volume['code'].tolist()
+                gain_codes = top_gainers['code'].tolist() if not top_gainers.empty else []
+                seen       = set(vol_codes)
+                ordered_codes = vol_codes + [c for c in gain_codes if c not in seen]
+                result = [c for c in ordered_codes if c in valid_codes]
+
+                logger.info(f"Market ranking fetched: {len(result)} candidates (volume+gainers, ordered).")
+                return result
         except Exception as e:
             logger.error(f"Error fetching market ranking: {e}")
-            # KRX FDR 실패 시 PyKrx로 종목 코드 목록 폴백 (거래량 정렬 없음)
-            # 비거래일엔 당일 목록이 비어있으므로 최근 거래일까지 최대 10일 역탐색
-            try:
-                from pykrx import stock as _pykrx
-                codes = []
-                ref_date = ''
-                for i in range(10):
-                    d = (datetime.now() - timedelta(days=i)).strftime('%Y%m%d')
-                    if market == 'KOSDAQ':
-                        c = _pykrx.get_market_ticker_list(d, market='KOSDAQ')
-                    elif market == 'KOSPI':
-                        c = _pykrx.get_market_ticker_list(d, market='KOSPI')
-                    else:
-                        c = (_pykrx.get_market_ticker_list(d, market='KOSPI') +
-                             _pykrx.get_market_ticker_list(d, market='KOSDAQ'))
-                    if c:
-                        codes = c
-                        ref_date = d
-                        break
-                logger.warning(f"Market ranking: PyKrx 폴백 {len(codes)}개 (기준일: {ref_date}, 거래량 정렬 없음)")
-                if codes:
-                    return codes[:limit]
-            except Exception as e2:
-                logger.error(f"Market ranking PyKrx 폴백 실패: {e2}")
-            # DB 폴백: 최근 추천·분석 이력에서 종목 코드 재사용 (비거래일 강제 실행용)
-            try:
-                from koreanstocks.core.data.database import db_manager
-                with db_manager.get_connection() as conn:
-                    cursor = conn.cursor()
-                    if market != 'ALL':
-                        cursor.execute(
-                            "SELECT DISTINCT code FROM recommendations WHERE json_extract(detail_json, '$.market') = ? ORDER BY session_date DESC LIMIT ?",
-                            (market, limit),
-                        )
-                    else:
-                        cursor.execute(
-                            "SELECT DISTINCT code FROM recommendations ORDER BY session_date DESC LIMIT ?",
-                            (limit,),
-                        )
-                    db_codes = [row[0] for row in cursor.fetchall()]
-                if db_codes:
-                    logger.warning(f"Market ranking: DB 폴백 {len(db_codes)}개 (최근 추천 종목, 비거래일 모드)")
-                    return db_codes[:limit]
-            except Exception as e3:
-                logger.error(f"Market ranking DB 폴백 실패: {e3}")
-            return []
+
+        # ── 최종 폴백: DB 이력 + 정적 풀 ────────────────────────────────
+        try:
+            from koreanstocks.core.data.database import db_manager
+            with db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                if market != 'ALL':
+                    cursor.execute(
+                        "SELECT DISTINCT code FROM recommendations WHERE json_extract(detail_json, '$.market') = ? ORDER BY session_date DESC LIMIT ?",
+                        (market, limit),
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT DISTINCT code FROM recommendations ORDER BY session_date DESC LIMIT ?",
+                        (limit,),
+                    )
+                db_codes = [row[0] for row in cursor.fetchall()]
+        except Exception as e3:
+            logger.error(f"Market ranking DB 폴백 실패: {e3}")
+            db_codes = []
+        # 최종 폴백: 정적 유동성 종목 풀로 보충 (FDR/KIND 전종목 API 불가 상황)
+        if market == 'KOSPI':
+            static_pool = _STATIC_KOSPI_POOL
+        elif market == 'KOSDAQ':
+            static_pool = _STATIC_KOSDAQ_POOL
+        else:
+            static_pool = _STATIC_STOCK_POOL
+        # DB 이력 코드 우선, 정적 풀로 나머지 보충
+        db_set = set(db_codes)
+        combined = db_codes + [c for c in static_pool if c not in db_set]
+        logger.warning(
+            f"Market ranking: 정적 종목 풀 폴백 {len(combined[:limit])}개 "
+            f"(DB {len(db_codes)}건 + 정적 풀 보충, FDR/KIND 전종목 API 불가)"
+        )
+        return combined[:limit]
+
+    def get_market_buckets(self, market: str = 'ALL') -> Dict[str, List[str]]:
+        """거래량·모멘텀·반등 3개 버킷으로 후보군 분류.
+
+        버킷 A (volume)   — 유동성 안정주: 거래량 상위, 급등락 제외
+        버킷 B (momentum) — 상승 모멘텀:  등락률 +2%~+15% 구간, 거래량 정렬
+        버킷 C (rebound)  — 반등 후보:    거래량 상위 절반 중 -2% 이하 하락주
+
+        공통 사전 필터:
+          · 유동성 하한: volume >= 50,000주 (소형·관리종목 제외)
+          · 상장 종목 목록 교차 검증
+          · 급등락 ±15% 초과 제외 (서킷브레이커·이슈 급등락 제외)
+
+        거래량 데이터 수집:
+          1차 — fdr.StockListing('KRX')          : 실시간 전종목 스냅샷
+          2차 — 개별 DataReader 배치 조회 (최대 300종목): KRX 차단 시 Yahoo Finance 경유
+
+        Returns:
+            {'volume': [...], 'momentum': [...], 'rebound': [...]}
+        """
+        LIQUIDITY_MIN    = 50_000   # 최소 거래량 (주)
+        SURGE_LIMIT_PCT  = 15.0     # 급등락 제외 임계값 (%)
+        MOMENTUM_MIN_PCT =  2.0     # 모멘텀 버킷 하한 (%)
+        REBOUND_MAX_PCT  = -2.0     # 반등 버킷 상한 (%)
+        _empty: Dict[str, List[str]] = {'volume': [], 'momentum': [], 'rebound': []}
+
+        try:
+            full_stock_list = self.get_stock_list()
+            if market != 'ALL':
+                valid_codes = set(full_stock_list[full_stock_list['market'] == market]['code'].tolist())
+            else:
+                valid_codes = set(full_stock_list['code'].tolist())
+
+            # 거래량+등락률 데이터 수집 (KRX 차단 시 배치 DataReader 폴백)
+            df = self._get_volume_change_df(valid_codes)
+
+            if df is None or df.empty or 'code' not in df.columns or 'volume' not in df.columns:
+                logger.warning("get_market_buckets: 거래량 데이터 없음 → get_market_ranking 폴백")
+                fallback = self.get_market_ranking(limit=200, market=market)
+                return {'volume': fallback, 'momentum': [], 'rebound': []}
+
+            df['volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(0)
+            df['change_pct'] = (
+                pd.to_numeric(df['change_pct'], errors='coerce').fillna(0)
+                if 'change_pct' in df.columns else 0.0
+            )
+
+            # 공통 사전 필터: 유동성 + 상장 종목 + 급등락 제외
+            df = df[
+                (df['volume'] >= LIQUIDITY_MIN) &
+                (df['code'].isin(valid_codes)) &
+                (df['change_pct'].abs() < SURGE_LIMIT_PCT)
+            ]
+
+            # 버킷 A — 거래량 상위 (중립 구간: -2%~+2% 포함, 급등락 이미 제외)
+            bucket_a = df.sort_values('volume', ascending=False)['code'].tolist()
+
+            # 버킷 B — 상승 모멘텀: +2%~+15%, 거래량 기준 정렬
+            df_b = df[df['change_pct'] >= MOMENTUM_MIN_PCT]
+            bucket_b = df_b.sort_values('volume', ascending=False)['code'].tolist()
+
+            # 버킷 C — 반등 후보: 거래량 상위 절반 중 -2% 이하 하락주, 하락폭순 정렬
+            vol_median = df['volume'].median()
+            df_c = df[(df['change_pct'] <= REBOUND_MAX_PCT) & (df['volume'] >= vol_median)]
+            bucket_c = df_c.sort_values('change_pct', ascending=True)['code'].tolist()
+
+            logger.info(
+                f"Market buckets ({market}): "
+                f"volume={len(bucket_a)}, momentum={len(bucket_b)}, rebound={len(bucket_c)}"
+            )
+            return {'volume': bucket_a, 'momentum': bucket_b, 'rebound': bucket_c}
+
+        except Exception as e:
+            logger.error(f"get_market_buckets 실패: {e} → get_market_ranking 폴백")
+            fallback = self.get_market_ranking(limit=200, market=market)
+            return {'volume': fallback, 'momentum': [], 'rebound': []}
 
     def is_trading_day(self, d: Optional[date_type] = None) -> bool:
         """한국 증시 거래일인지 여부 반환.
@@ -316,7 +567,7 @@ class StockDataProvider:
           1단계 (즉시)  — 토·일 → False
           2단계 (오프라인) — exchange_calendars XKRX: 공휴일·대체공휴일·KRX 전용 휴장
           3단계 (오프라인) — holidays.KR 보완: exchange_calendars가 놓친 선거일 등
-          4단계 (온라인)  — pykrx 실측 확인 (d=오늘이고 네트워크 가용 시만)
+          4단계 (온라인)  — FDR 실측 확인 (d=오늘이고 네트워크 가용 시만)
         """
         target = d or datetime.now().date()
 
@@ -342,17 +593,25 @@ class StockDataProvider:
         except Exception as e:
             logger.debug(f"holidays.KR 체크 실패: {e}")
 
-        # 4단계: pykrx 온라인 실측 — d=오늘인 경우만 (미래 날짜는 KRX 데이터 없음)
+        # 4단계: FDR 온라인 실측 — d=오늘이고 네트워크 가용 시만
+        # 삼성전자 당일 OHLCV 조회 후 인덱스 날짜가 오늘인지 검증
         today = datetime.now().date()
         if target == today:
             try:
-                from pykrx import stock as _pykrx
-                tickers = _pykrx.get_market_ticker_list(today.strftime('%Y%m%d'), market='KOSPI')
-                return len(tickers) > 0
+                today_iso = today.isoformat()
+                df = fdr.DataReader('005930', today_iso, today_iso)
+                if not df.empty:
+                    last_str = df.index[-1].strftime('%Y-%m-%d')
+                    if last_str == today_iso:
+                        return True  # 오늘 거래 데이터 확인됨
+                    else:
+                        logger.debug(f"FDR이 이전 거래일({last_str}) 데이터 반환 → 오프라인 판단 사용")
+                else:
+                    logger.debug("FDR 데이터 없음(장 전 또는 미갱신) → 오프라인 판단 사용")
             except Exception as e:
-                logger.warning(f"pykrx 거래일 확인 실패: {e} → 오프라인 판단 사용")
+                logger.warning(f"FDR 거래일 확인 실패: {e} → 오프라인 판단 사용")
 
-        # 오프라인 체크 통과 (pykrx 실패 or 미래/과거 날짜) → 거래일로 판단
+        # 오프라인 체크 통과 (FDR 미확인 or 미래/과거 날짜) → 거래일로 판단
         return True
 
     def get_stocks_by_theme(self, keywords: List[str], market: str = 'ALL') -> pd.DataFrame:
@@ -366,16 +625,16 @@ class StockDataProvider:
                 df = df[df['market'] == market]
 
             theme_mask = pd.Series([False] * len(df), index=df.index)
-            
+
             # 키워드 검색 로직 (더 유연하게)
             search_cols = ['sector', 'industry', 'name'] # 종목명(name)도 검색 대상에 추가
-            
+
             for keyword in keywords:
                 for col in search_cols:
                     if col in df.columns:
                         # 키워드를 포함하는 경우 (대소문자 무시)
                         theme_mask |= df[col].astype(str).str.contains(keyword, na=False, case=False)
-            
+
             theme_stocks = df[theme_mask]
             logger.info(f"Found {len(theme_stocks)} stocks for keywords: {keywords}")
             return theme_stocks

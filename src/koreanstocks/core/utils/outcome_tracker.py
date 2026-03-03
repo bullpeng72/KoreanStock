@@ -36,25 +36,7 @@ def _is_correct(action: str, return_pct: float) -> int:
 
 
 def _fetch_ohlcv(code: str, from_date: str, to_date: str) -> pd.DataFrame:
-    """PyKrx → FDR 순으로 OHLCV 조회. 공통 컬럼(close 포함) DataFrame 반환."""
-    from_str = from_date.replace("-", "")
-    to_str   = to_date.replace("-", "")
-
-    # 1차: PyKrx
-    try:
-        from pykrx import stock as _pykrx
-        df = _pykrx.get_market_ohlcv(from_str, to_str, code)
-        if df is not None and not df.empty:
-            df.index = pd.to_datetime(df.index)
-            rename = {"시가": "open", "고가": "high", "저가": "low",
-                      "종가": "close", "거래량": "volume"}
-            df = df.rename(columns=rename)
-            return df[[c for c in ["open", "high", "low", "close", "volume"]
-                        if c in df.columns]]
-    except Exception as e:
-        logger.debug(f"[{code}] PyKrx OHLCV 실패: {e}")
-
-    # 2차: FinanceDataReader
+    """FDR로 OHLCV 조회. 공통 컬럼(close 포함) DataFrame 반환."""
     try:
         import FinanceDataReader as fdr
         df = fdr.DataReader(code, from_date, to_date)

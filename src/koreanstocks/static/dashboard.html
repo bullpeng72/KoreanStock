@@ -406,6 +406,18 @@
       <div id="telegram-status" style="font-size:.88em;color:var(--muted)">확인 중…</div>
     </div>
 
+    <!-- 데이터 소스 헬스체크 카드 -->
+    <div class="card">
+      <div class="card-title">🔌 데이터 소스 헬스체크</div>
+      <p style="color:var(--muted);font-size:.88em;margin:0 0 12px">
+        데이터 수집에 사용하는 각 라이브러리와 외부 API의 연결 상태를 확인합니다.
+      </p>
+      <button class="btn btn-secondary" id="btn-datasource-check" onclick="runDataSourceCheck()" style="margin-bottom:14px">
+        🔍 헬스체크 실행
+      </button>
+      <div id="datasource-result"></div>
+    </div>
+
     <div class="card">
       <div class="card-title">ℹ️ 정보</div>
       <div class="kv-row"><span class="kv-key">버전</span><span class="kv-val">v0.3.4</span></div>

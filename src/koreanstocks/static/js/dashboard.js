@@ -1154,6 +1154,96 @@ async function loadTelegramStatus() {
 }
 
 // ═══════════════════════════════════════════════════════
+// 데이터 소스 헬스체크
+// ═══════════════════════════════════════════════════════
+
+async function runDataSourceCheck() {
+  const btn = document.getElementById("btn-datasource-check");
+  const el  = document.getElementById("datasource-result");
+
+  btn.disabled = true;
+  btn.textContent = "⏳ 확인 중…";
+  el.innerHTML = `<div style="color:var(--muted);font-size:.88em;padding:8px 0">
+    8개 소스를 병렬로 점검합니다. 최대 15초 소요될 수 있습니다…</div>`;
+
+  try {
+    const data = await api("/api/market/data-sources");
+    el.innerHTML = _renderDataSources(data);
+  } catch (e) {
+    el.innerHTML = `<span style="color:var(--sell);font-size:.88em">헬스체크 실패: ${e.message}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "🔍 헬스체크 실행";
+  }
+}
+
+function _renderDataSources(data) {
+  const sources = data.sources || [];
+  const sum = data.summary || {};
+  const checkedAt = data.checked_at || "";
+
+  // 요약 배지
+  const sumHtml = [
+    sum.ok   > 0 ? `<span style="color:var(--buy)">✅ 정상 ${sum.ok}</span>`   : "",
+    sum.warn > 0 ? `<span style="color:#ffaa00">⚠️ 경고 ${sum.warn}</span>`   : "",
+    sum.error> 0 ? `<span style="color:var(--sell)">❌ 오류 ${sum.error}</span>` : "",
+  ].filter(Boolean).join("  ");
+
+  let html = `
+    <div style="display:flex;justify-content:space-between;align-items:center;
+                margin-bottom:12px;font-size:.82em">
+      <div style="display:flex;gap:14px">${sumHtml}</div>
+      <div style="color:var(--muted)">확인: ${checkedAt}</div>
+    </div>`;
+
+  // 카테고리 순서로 그룹핑
+  const categoryOrder = [
+    "개별 주가 (OHLCV)", "개별 주가 (대체 소스)",
+    "전종목 목록", "전종목 목록 (대체 소스)",
+    "시장 지수", "뉴스·감성 데이터", "AI / LLM",
+    "공시 데이터 (선택)", "로컬 저장소",
+  ];
+  const grouped = {};
+  for (const s of sources) {
+    (grouped[s.category] = grouped[s.category] || []).push(s);
+  }
+
+  for (const cat of categoryOrder) {
+    const items = grouped[cat];
+    if (!items) continue;
+    for (const s of items) {
+      const color   = s.status === "ok" ? "var(--buy)" : s.status === "warn" ? "#ffaa00" : "var(--sell)";
+      const icon    = s.status === "ok" ? "✅" : s.status === "warn" ? "⚠️" : "❌";
+      const latency = s.latency_ms < 10000 ? `${s.latency_ms}ms` : "—";
+      const usedFor = (s.used_for || []).join(" · ");
+
+      html += `
+      <div style="border:1px solid var(--border);border-radius:8px;padding:10px 14px;
+                  margin-bottom:8px;background:var(--card-bg)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div>
+            <span style="font-weight:600">${icon} ${s.name}</span>
+            <span style="margin-left:8px;font-size:.78em;color:var(--muted);
+                         background:var(--border);padding:1px 6px;border-radius:4px">${s.category}</span>
+          </div>
+          <div style="font-size:.8em;color:${color};white-space:nowrap;font-weight:600">
+            ${s.status === "ok" ? latency : s.status.toUpperCase()}
+          </div>
+        </div>
+        <div style="font-size:.82em;color:var(--muted);margin-top:5px">${s.description}</div>
+        <div style="font-size:.8em;color:var(--muted);margin-top:2px">소스: <code style="font-size:.92em">${s.source}</code></div>
+        <div style="font-size:.8em;color:${color};margin-top:4px">${s.detail || ""}</div>
+        ${usedFor ? `<div style="font-size:.77em;color:var(--muted);margin-top:5px;
+                                  border-top:1px solid var(--border);padding-top:5px">
+          용도: ${usedFor}</div>` : ""}
+      </div>`;
+    }
+  }
+
+  return html;
+}
+
+// ═══════════════════════════════════════════════════════
 // Tab 6 — 모델 신뢰도
 // ═══════════════════════════════════════════════════════
 

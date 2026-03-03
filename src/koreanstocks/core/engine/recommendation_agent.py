@@ -2,7 +2,7 @@ import json
 import pandas as pd
 import logging
 from datetime import date
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from koreanstocks.core.data.provider import data_provider
 from koreanstocks.core.engine.analysis_agent import analysis_agent
@@ -10,38 +10,19 @@ from koreanstocks.core.data.database import db_manager
 
 logger = logging.getLogger(__name__)
 
+# 버킷 메타데이터 (이름 → 한국어 레이블)
+BUCKET_LABELS: Dict[str, str] = {
+    'volume':   '거래량 상위',
+    'momentum': '상승 모멘텀',
+    'rebound':  '반등 후보',
+}
 
-def _apply_sector_diversity(results: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
-    """섹터 다양성을 보장하며 상위 종목 선정.
-
-    섹터당 최대 max_per_sector개로 제한하여 편중 방지.
-    섹터 정보가 없는 종목은 제한 없이 통과.
-    선택 후 limit에 미달하면 한도 초과 종목을 점수순으로 보충.
-    """
-    max_per_sector = max(1, round(limit / 3))  # 섹터당 상한 ~33%
-    sector_count: Dict[str, int] = {}
-    selected: List[Dict[str, Any]] = []
-    deferred: List[Dict[str, Any]] = []  # 섹터 한도 초과 종목 (보충용)
-
-    for rec in results:  # composite_score 내림차순 정렬 상태
-        sector = (rec.get('sector') or '').strip()
-        if not sector:
-            # 섹터 미분류 — 한도 적용 없이 선택
-            selected.append(rec)
-        elif sector_count.get(sector, 0) < max_per_sector:
-            selected.append(rec)
-            sector_count[sector] = sector_count.get(sector, 0) + 1
-        else:
-            deferred.append(rec)
-
-        if len(selected) >= limit:
-            break
-
-    # 섹터 다양화 후 부족분은 점수순 보충
-    if len(selected) < limit:
-        selected.extend(deferred[:limit - len(selected)])
-
-    return selected[:limit]
+# 버킷별 분석 풀 비율
+_BUCKET_RATIOS = [
+    ('volume',   0.40),
+    ('momentum', 0.35),
+    ('rebound',  0.25),
+]
 
 
 def _composite_score(x: Dict[str, Any]) -> float:
@@ -57,7 +38,6 @@ def _composite_score(x: Dict[str, Any]) -> float:
     ml_count = x.get('ml_model_count', 0)
 
     if ml_count == 0:
-        # ML 모델 없음 — tech 위주
         return x.get('tech_score', 50.0) * 0.65 + sentiment_norm * 0.35
     return (
         x.get('tech_score', 50.0) * 0.40
@@ -66,61 +46,155 @@ def _composite_score(x: Dict[str, Any]) -> float:
     )
 
 
+def _apply_bucket_quota(
+    results: List[Dict[str, Any]],
+    limit: int,
+) -> List[Dict[str, Any]]:
+    """버킷별 쿼터를 보장하며 최종 종목 선정.
+
+    각 버킷에서 비율에 따라 우선 선정한 뒤,
+    미달 버킷의 슬롯은 전체 점수 순으로 보충한다.
+    섹터 편중도 버킷 내에서 max_per_sector(~33%)로 제한.
+    """
+    max_per_sector = max(1, round(limit / 3))
+
+    # 버킷별 쿼터 계산 (합계가 limit이 되도록 조정)
+    quotas: Dict[str, int] = {}
+    assigned = 0
+    for i, (bucket_name, ratio) in enumerate(_BUCKET_RATIOS):
+        if i < len(_BUCKET_RATIOS) - 1:
+            q = max(1, round(limit * ratio))
+            quotas[bucket_name] = q
+            assigned += q
+        else:
+            quotas[bucket_name] = max(1, limit - assigned)
+
+    selected: List[Dict[str, Any]] = []
+    selected_codes: set = set()
+    sector_count: Dict[str, int] = {}
+
+    def _pick(candidates: List[Dict[str, Any]], quota: int) -> List[Dict[str, Any]]:
+        """candidates 중 쿼터만큼 섹터 다양성을 고려해 선정."""
+        picked: List[Dict[str, Any]] = []
+        deferred: List[Dict[str, Any]] = []
+        for rec in candidates:
+            if rec['code'] in selected_codes:
+                continue
+            sector = (rec.get('sector') or '').strip()
+            if not sector or sector_count.get(sector, 0) < max_per_sector:
+                picked.append(rec)
+                if sector:
+                    sector_count[sector] = sector_count.get(sector, 0) + 1
+            else:
+                deferred.append(rec)
+            if len(picked) >= quota:
+                break
+        # 섹터 한도로 미달이면 보충
+        if len(picked) < quota:
+            for rec in deferred:
+                if rec['code'] not in selected_codes and rec not in picked:
+                    picked.append(rec)
+                    if len(picked) >= quota:
+                        break
+        return picked
+
+    # 버킷 순서대로 쿼터 선정
+    for bucket_name, quota in quotas.items():
+        bucket_results = sorted(
+            [r for r in results if r.get('bucket') == bucket_name],
+            key=_composite_score, reverse=True,
+        )
+        picks = _pick(bucket_results, quota)
+        selected.extend(picks)
+        selected_codes.update(r['code'] for r in picks)
+
+    # 전체 limit 미달 시 남은 종목으로 보충 (점수 순)
+    if len(selected) < limit:
+        remaining = sorted(
+            [r for r in results if r['code'] not in selected_codes],
+            key=_composite_score, reverse=True,
+        )
+        picks = _pick(remaining, limit - len(selected))
+        selected.extend(picks)
+
+    return selected[:limit]
+
+
 class RecommendationAgent:
     """분석된 데이터를 바탕으로 투자 종목을 추천하는 에이전트"""
 
-    def get_recommendations(self, limit: int = 5, market: str = 'ALL', theme_keywords: List[str] = None, theme_label: str = '전체') -> List[Dict[str, Any]]:
-        """유망 종목 추천 리스트 생성 (테마 및 시장 필터 적용)"""
+    def get_recommendations(
+        self,
+        limit: int = 5,
+        market: str = 'ALL',
+        theme_keywords: List[str] = None,
+        theme_label: str = '전체',
+    ) -> List[Dict[str, Any]]:
+        """유망 종목 추천 리스트 생성 (버킷 기반 후보군 구성)
+
+        버킷 구성:
+          volume   (40%) — 거래량 상위 유동성 안정주
+          momentum (35%) — 상승 모멘텀 (+2%~+15%)
+          rebound  (25%) — 거래량 상위 중 하락 반등 후보
+
+        분석 풀: min(limit * 8, 80)  →  limit=5: 40개, limit=10: 80개
+        """
         logger.info(f"Generating recommendations (Market: {market}, Theme: {theme_label})...")
 
-        # 1. 후보군 코드 선정
+        # 종목명 매칭용 전체 리스트 (루프 밖 1회)
+        stock_list = data_provider.get_stock_list()
+
+        # ── 1. 후보군 코드 선정 ─────────────────────────────────────
         if theme_keywords:
-            theme_df = data_provider.get_stocks_by_theme(theme_keywords, market)
+            # 테마 지정 시: 테마 종목 + 거래량 랭킹 교집합 우선, 나머지 추가
+            theme_df    = data_provider.get_stocks_by_theme(theme_keywords, market)
             theme_codes = set(theme_df['code'].tolist())
-            # 거래량 상위 랭킹 순서로 정렬하여 유동성 높은 종목 우선 분석 (market 필터 적용)
-            ranked_codes = data_provider.get_market_ranking(limit=200, market=market)
-            candidate_codes = [c for c in ranked_codes if c in theme_codes]
-            # 랭킹에 없는 테마 종목은 뒤에 추가
+            ranked      = data_provider.get_market_ranking(limit=200, market=market)
+            candidate_codes = [c for c in ranked if c in theme_codes]
             candidate_codes += [c for c in theme_df['code'].tolist() if c not in set(candidate_codes)]
+            # 테마 모드: 버킷 없이 단일 풀로 처리 (bucket='volume' 태그)
+            code_bucket: Dict[str, str] = {c: 'volume' for c in candidate_codes}
         else:
-            # get_market_ranking() 내부에서 market 필터 적용 — 별도 post-filter 불필요
-            candidate_codes = data_provider.get_market_ranking(limit=200, market=market)
+            # 버킷 기반 후보군 구성
+            buckets = data_provider.get_market_buckets(market)
+            total_pool = min(limit * 8, 80)
+            code_bucket = {}
+            seen: set = set()
+
+            for bucket_name, ratio in _BUCKET_RATIOS:
+                pool_size = max(2, round(total_pool * ratio))
+                count = 0
+                for code in buckets.get(bucket_name, []):
+                    if code not in seen and count < pool_size:
+                        code_bucket[code] = bucket_name
+                        seen.add(code)
+                        count += 1
+
+            candidate_codes = list(code_bucket.keys())
 
         if not candidate_codes:
             return []
 
-        # 2. 종목명 매칭을 위한 전체 리스트 확보
-        stock_list = data_provider.get_stock_list()
-
-        # FDR stock_list 실패 대비 PyKrx 폴백 준비 (루프 밖에서 1회 import)
-        try:
-            from pykrx import stock as _pykrx
-        except ImportError:
-            _pykrx = None
-
-        # 3. 선별된 후보군 분석 (limit 기반 동적 산정, 최대 60개, 병렬 실행)
-        analysis_pool = min(limit * 6, 60)
-        target_codes = candidate_codes[:analysis_pool]
-        candidates = []
-        for code in target_codes:
-            stock_info = stock_list[stock_list['code'] == code]
-            if not stock_info.empty:
-                nm = stock_info.iloc[0]['name']
-            elif _pykrx is not None:
-                nm = _pykrx.get_market_ticker_name(code) or code
-            else:
-                nm = code
+        # ── 2. 종목명 해석 ──────────────────────────────────────────
+        candidates: List[Tuple[str, str]] = []
+        for code in candidate_codes:
+            row = stock_list[stock_list['code'] == code]
+            nm = row.iloc[0]['name'] if not row.empty else code
             candidates.append((code, nm))
 
-        results = []
+        # ── 3. 병렬 분석 ────────────────────────────────────────────
+        results: List[Dict[str, Any]] = []
         with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {executor.submit(self._analyze_candidate, code, nm): code
-                       for code, nm in candidates}
+            futures = {
+                executor.submit(self._analyze_candidate, code, nm): code
+                for code, nm in candidates
+            }
             for future in as_completed(futures):
                 code = futures[future]
                 try:
-                    res = future.result(timeout=60)   # 종목당 최대 60초 대기
+                    res = future.result(timeout=60)
                     if res is not None:
+                        res['bucket'] = code_bucket.get(code, 'volume')
                         results.append(res)
                 except FuturesTimeoutError:
                     logger.warning(f"Analysis timeout: {code}, skipping")
@@ -131,15 +205,13 @@ class RecommendationAgent:
             logger.warning("No successful analyses to recommend.")
             return []
 
-        # 4. composite 점수로 정렬
-        results.sort(key=_composite_score, reverse=True)
-
-        # 5. 섹터 다양성 보장 후 최종 선정
-        final_recs = _apply_sector_diversity(results, limit)
+        # ── 4. 버킷 쿼터 + 섹터 다양성으로 최종 선정 ───────────────
+        final_recs = _apply_bucket_quota(results, limit)
         for rec in final_recs:
-            rec['theme'] = theme_label
-            rec['analysis_market'] = market
-            rec['composite_score'] = round(_composite_score(rec), 2)
+            rec['theme']            = theme_label
+            rec['analysis_market']  = market
+            rec['composite_score']  = round(_composite_score(rec), 2)
+            rec['bucket_label']     = BUCKET_LABELS.get(rec.get('bucket', 'volume'), '')
         self._save_to_db(final_recs)
 
         return final_recs
@@ -166,7 +238,6 @@ class RecommendationAgent:
                     logger.warning(f"JSON serialization failed for {rec.get('code', '?')}: {e}")
                     detail_json = None
 
-                # 동일 날짜 + 동일 종목 기존 데이터 삭제 후 재삽입 (UPSERT)
                 cursor.execute(
                     'DELETE FROM recommendations WHERE code = ? AND session_date = ?',
                     (rec['code'], session_date)

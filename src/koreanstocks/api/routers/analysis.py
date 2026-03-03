@@ -25,19 +25,11 @@ def _resolve_name(code: str, dp, db=None) -> str:
         row = stock_list[stock_list["code"] == code]
         if not row.empty:
             return row.iloc[0]["name"]
-    # 1차 폴백: 로컬 DB stocks 테이블 (오프라인·비거래일 안전)
+    # 폴백: 로컬 DB stocks 테이블 (오프라인·비거래일 안전)
     if db is not None:
         cached = db.get_stock_name(code)
         if cached:
             return cached
-    # 2차 폴백: PyKrx
-    try:
-        from pykrx import stock as pykrx_stock
-        name = pykrx_stock.get_market_ticker_name(code)
-        if name:
-            return name
-    except Exception as e:
-        logger.warning(f"PyKrx 종목명 조회 실패 [{code}]: {e}")
     return code
 
 
