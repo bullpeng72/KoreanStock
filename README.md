@@ -58,7 +58,7 @@ AI/LLM      OpenAI GPT-4o-mini
 ML          Scikit-learn (Random Forest, Gradient Boosting), XGBoost
 기술 지표    ta (RSI, MACD, BB, SMA, OBV, ADX, VWAP, CMF, MFI, Stochastic, CCI, ATR, Donchian)
              + finta (SQZMI, VZO, Fisher Transform, Williams Fractal)
-데이터       FinanceDataReader, PyKrx (표시용 펀더멘털·수급), Naver News API
+데이터       FinanceDataReader, Naver News API
 DB          SQLite
 자동화       GitHub Actions (평일 16:30 KST), Telegram Bot API
 시각화       Plotly, Matplotlib, Chart.js (백테스트 차트)
@@ -134,7 +134,7 @@ KRX 전체 상장 종목
             ↓ 합집합 (선택한 시장 KOSPI / KOSDAQ / ALL 필터 적용)
         최대 약 400개 후보
             ↓ 거래량 순 정렬 후 상위 30~60개 심층 분석 (--limit 값 × 6, 최대 60개)
-        최종 N종목 추천 (--limit, 기본값 5)
+        최종 N종목 추천 (--limit, 기본값 9)
 ```
 
 ### 종목별 심층 분석 (4단계)
@@ -299,7 +299,7 @@ CMF 자금흐름 (최대 5점): CMF > 0.05 → +5pt / CMF > 0 → +3pt
 ### 2. 단계별 활용 방법
 
 **Step 1 — 스크리닝 (매일 자동)**
-- 텔레그램 알림으로 오늘의 추천 5종목 확인
+- 텔레그램 알림으로 오늘의 추천 9종목 확인
 - 종합 점수 상위 2–3종목을 후보로 선정
 
 **Step 2 — 지속성 확인**
@@ -326,7 +326,7 @@ AI 추천 + 아래 조건 중 2개 이상 충족 시 매수 검토 ✅
 
 | 원칙 | 설명 |
 |------|------|
-| **분산 투자** | 추천 5종목 중 동일 섹터에 몰리지 않도록 1–2종목만 선택 |
+| **분산 투자** | 추천 9종목 중 동일 섹터에 몰리지 않도록 1–2종목만 선택 |
 | **손절 기준** | 매수가 대비 7–8% 하락 시 손절 고려 (시스템은 손절선 미제공) |
 | **목표가 활용** | 목표가는 단기 참고값이며 보장 수치가 아님. 실현 후 일부 익절 전략 권장 |
 | **비중 관리** | 단일 종목에 총 자산의 10% 이상 집중 투자 지양 |
@@ -634,7 +634,7 @@ NAVER_CLIENT_SECRET
   → KOSPI + KOSDAQ 종목 리스트 갱신
   → 거래량/등락률 상위 100종목 스크리닝
   → 상위 30종목 심층 분석 (기술 + ML + 뉴스 + GPT)
-  → 종합 점수 상위 5종목 선정
+  → 종합 점수 상위 9종목 선정
   → SQLite DB 날짜별 저장
   → GitHub Artifact에 DB 백업 (90일 보존)
   → DB를 저장소에 자동 커밋·푸시
@@ -659,6 +659,27 @@ NAVER_CLIENT_SECRET
 | **모델 신뢰도** | `/dashboard#model` | ML 모델 AUC·과적합 갭·드리프트 등급·피처 중요도·재학습 권장 여부 확인 |
 | **브리핑** | `/` | Reveal.js 일일 슬라이드 (종목별 점수·뉴스·AI 의견) |
 | **API 문서** | `/docs` | FastAPI Swagger UI |
+
+---
+
+## 📝 변경 이력
+
+### v0.3.5 (2026-03-03)
+
+- ✨ 추천 버킷(거래량 상위/상승 모멘텀/반등 후보) 배지 UI 추가 — 대시보드·슬라이드 동시 반영
+- ✨ 기본 추천 종목 수 5 → 9개로 상향 (scheduler, CLI, API 일괄 변경)
+- ✨ 분석 설정 종목 수 자동 선택 로직 (전체 시장 → 9개, 테마 지정 → 5개)
+- 🎨 버킷 배지 색상 CSS 변수 적용 — 다크/라이트 테마 모두 가시성 보장
+- 🐛 CLI `recommend` 명령이 `--limit` 인수를 scheduler에 전달하지 않던 버그 수정
+- 🔧 종목 수 드롭다운 5개·9개 두 가지로 단순화 (3·10·15 제거)
+- 🔧 힌트 문구 레이아웃 개선 — 카드 제목 옆 인라인 배치 (flex baseline)
+- 🔧 pykrx 라이브러리 제거 (FinanceDataReader 단독 운용)
+
+### v0.3.4 (2026-02-28)
+
+- ✨ 추천 성과 추적 기능 추가 (5·10·20거래일 후 실적 검증, `outcomes` CLI)
+- ✨ 뉴스 캐시 TTL 1시간 단위로 변경 (장중 새 공시 반영)
+- 🔧 감성 분석 퀀트 애널리스트 시스템 프롬프트 + 분포 지침 추가 (편향 해소)
 
 ---
 

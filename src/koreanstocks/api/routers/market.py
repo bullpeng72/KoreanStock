@@ -69,6 +69,30 @@ def _chk_kind_api():
     return {"status": "ok", "detail": f"KOSPI {kospi:,} · KOSDAQ {kosdaq:,}종목 수신"}
 
 
+def _chk_naver_sise():
+    """네이버 금융 시세 — 거래량 조회 2차 폴백 연결 상태 확인 (KOSPI 1페이지 샘플)."""
+    import requests, re
+    from bs4 import BeautifulSoup
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    r = requests.get(
+        'https://finance.naver.com/sise/sise_market_sum.naver',
+        params={'sosok': '0', 'page': '1'},
+        headers=headers, timeout=10,
+    )
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, 'html.parser')
+    stocks = [a['href'].split('code=')[-1] for a in soup.select('table.type_2 td a[href*="code="]')]
+    if not stocks:
+        return {"status": "warn", "detail": "종목 파싱 실패 (HTML 구조 변경 가능성)"}
+    pager = soup.select('.pgRR a')
+    last_page = 0
+    if pager:
+        m = re.search(r'page=(\d+)', pager[-1]['href'])
+        if m:
+            last_page = int(m.group(1))
+    return {"status": "ok", "detail": f"KOSPI 1p/{last_page}p — {len(stocks)}종목 수신 (code·거래량·등락률)"}
+
+
 def _chk_fdr_index():
     import FinanceDataReader as fdr
     start = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
@@ -138,7 +162,7 @@ def _chk_sqlite():
     return {"status": "ok", "detail": f"recommendations {recs:,}건 · analysis_history {hist:,}건"}
 
 
-# 소스 메타데이터 정의 (id, name, category, description, used_for, fn) — 8개
+# 소스 메타데이터 정의 (id, name, category, description, used_for, fn) — 9개
 _DATA_SOURCES = [
     {
         "id": "fdr_ohlcv",
@@ -154,20 +178,30 @@ _DATA_SOURCES = [
         "id": "fdr_listing",
         "name": "FinanceDataReader — 종목 목록",
         "category": "전종목 목록",
-        "description": "KOSPI·KOSDAQ 전체 상장 종목 코드·명칭·섹터 목록 (FDR 직접 조회 상태 확인)",
-        "source": "KRX Open API (FDR) — 현재 차단, KIND API 폴백 동작 중",
-        "used_for": ["후보군 유효성 검증", "종목명·섹터 매핑", "테마 필터링"],
+        "description": "FDR StockListing 복구 여부 모니터링 — 현재 KRX 세션 정책으로 차단, KIND API가 실질 주력 소스",
+        "source": "KRX Open API (FinanceDataReader)",
+        "used_for": ["복구 시 후보군 유효성 검증", "종목명·섹터 매핑", "테마 필터링"],
         "fn": _chk_fdr_listing,
     },
     {
         "id": "kind_api",
         "name": "KIND API — 전종목 목록",
-        "category": "전종목 목록 (실질 주력 소스)",
+        "category": "전종목 목록 (대체 소스)",
         "description": "한국거래소 KIND 포털 — 세션 인증 없이 전체 상장 종목 목록 수신 가능",
         "source": "kind.krx.co.kr (KRX 공시 포털)",
         "used_for": ["종목 목록 주력 수집 (FDR KRX 차단 시 자동 대체)",
                      "후보군 구성", "종목명·섹터·업종 매핑"],
         "fn": _chk_kind_api,
+    },
+    {
+        "id": "naver_sise",
+        "name": "네이버 금융 시세",
+        "category": "전종목 시세 (거래량·등락률)",
+        "description": "전종목 거래량·등락률 실질 주력 소스 — FDR KRX 차단 후 자동 대체, BeautifulSoup 병렬 파싱 (~9초)",
+        "source": "finance.naver.com/sise/sise_market_sum.naver",
+        "used_for": ["버킷 구성 volume/momentum/rebound (get_market_buckets)",
+                     "후보군 거래량·등락률 정렬 (get_market_ranking)"],
+        "fn": _chk_naver_sise,
     },
     {
         "id": "fdr_index",

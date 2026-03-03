@@ -24,7 +24,7 @@ class NewsAgent:
         self.naver_client_id = config.NAVER_CLIENT_ID
         self.naver_client_secret = config.NAVER_CLIENT_SECRET
         self.dart_api_key = config.DART_API_KEY
-        self._cache: Dict[str, Any] = {}             # key: "{종목명}_{YYYY-MM-DD}" — 당일 TTL 캐시
+        self._cache: Dict[str, Any] = {}             # key: "{종목명}_{YYYY-MM-DD_HH}" — 1시간 TTL 캐시
         self._dart_corp_cache: Dict[str, str] = {}   # stock_code → DART corp_code (영구 캐시)
 
     def get_sentiment_score(self, stock_name: str, stock_code: str = '') -> Dict[str, Any]:
@@ -33,11 +33,11 @@ class NewsAgent:
         캐시 우선순위:
           L1 — 프로세스 내 메모리 (동일 실행 내 중복 호출 방지)
           L2 — SQLite 영속 캐시 (GitHub Actions 재실행·앱 재시작 시 GPT 비용 절감)
-          당일(YYYY-MM-DD) 키가 일치할 때만 히트; 날짜가 바뀌면 자동으로 새로 수집.
+          {종목명}_{YYYY-MM-DD_HH} 키로 1시간 TTL — 장중 새 공시 반영 가능.
         """
         from koreanstocks.core.data.database import db_manager
 
-        cache_key = f"{stock_name}_{date.today().isoformat()}"
+        cache_key = f"{stock_name}_{datetime.now().strftime('%Y-%m-%d_%H')}"
 
         # L1: 메모리 캐시
         if cache_key in self._cache:
@@ -413,6 +413,7 @@ class NewsAgent:
         prompt = f"""
         다음은 주식 종목 '{stock_name}'에 대한 최신 정보입니다.
         뉴스와 공시 모두 시간 가중치(오늘=1.00, 오래될수록 감소)가 표시되어 있습니다.
+        가중치가 높을수록 최근 정보이므로 감성 점수 산출 시 더 크게 반영해 주세요.
 
         [뉴스 제목 및 시간 가중치]
         {news_section}{dart_instruction}

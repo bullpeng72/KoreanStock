@@ -261,6 +261,11 @@ function scoreBarHtml(label, val) {
     </div>`;
 }
 
+function bucketBadge(bucket, label) {
+  if (!bucket || !label) return "";
+  return `<span class="bucket-badge bucket-${bucket}">${label}</span>`;
+}
+
 // ── 추천 카드 렌더링 ─────────────────────────────────────────────
 function buildRecRow(rec) {
   const ai     = rec.ai_opinion || {};
@@ -271,7 +276,7 @@ function buildRecRow(rec) {
     <div class="rec-row" onclick="openModal(${JSON.stringify(rec).replace(/"/g, "&quot;")})">
       <div>
         <div class="rec-row-name">${rec.name || rec.code}</div>
-        <div class="rec-row-code">${rec.code} ${mktBadge(rec.market)}
+        <div class="rec-row-code">${rec.code} ${mktBadge(rec.market)}${bucketBadge(rec.bucket, rec.bucket_label)}
           ${rec.theme && rec.theme !== "전체"
             ? `<span style="font-size:.72em;color:var(--muted);margin-left:4px">[${rec.theme}]</span>` : ""}</div>
       </div>
@@ -680,17 +685,50 @@ async function toggleWlHistory(code) {
       el.innerHTML = `<span style="color:var(--muted);font-size:.82em">이전 분석 데이터가 없습니다.</span>`;
       return;
     }
-    el.innerHTML = history.map(h => `
-      <div class="history-row">
-        <div class="flex-row">
-          <span>📅 <strong>${h.date}</strong></span>
-          <span>${badgeHtml(h.action)}</span>
-        </div>
-        <div style="font-size:.78em;color:var(--muted)">
-          Tech ${h.tech_score} · ML ${h.ml_score} · News ${h.sentiment_score}
-        </div>
-        <div style="font-size:.82em;margin-top:2px">${h.summary || ""}</div>
-      </div>`).join("");
+
+    el.innerHTML = history.map((h, idx) => {
+      const detailId  = `hist-detail-${code}-${idx}`;
+      const hasDetail = !!h.detail;
+      const ts        = h.date ? h.date.replace('T', ' ').substring(0, 16) : '—';
+      const techVal   = h.tech_score  != null ? Number(h.tech_score).toFixed(1)  : '—';
+      const mlVal     = h.ml_score    != null ? Number(h.ml_score).toFixed(1)    : '—';
+      const newsVal   = h.sentiment_score != null
+                          ? Number(h.sentiment_score).toFixed(1) : '—';
+
+      return `
+        <div class="history-row">
+          <div class="flex-row" style="align-items:center;gap:8px">
+            <span style="font-size:.85em">📅 <strong>${ts}</strong></span>
+            <span>${badgeHtml(h.action)}</span>
+            ${hasDetail
+              ? `<button class="btn btn-secondary btn-sm hist-toggle-btn"
+                         style="margin-left:auto;font-size:.72em;padding:2px 8px"
+                         data-detail-id="${detailId}">상세 보기 ▼</button>`
+              : ''}
+          </div>
+          <div style="font-size:.78em;color:var(--muted);margin-top:3px">
+            Tech <strong>${techVal}</strong> · ML <strong>${mlVal}</strong> · News <strong>${newsVal}</strong>
+          </div>
+          <div style="font-size:.82em;margin-top:3px;color:var(--text)">${h.summary || ""}</div>
+          ${hasDetail
+            ? `<div id="${detailId}" class="hist-detail">
+                 ${buildWlResult(h.detail)}
+               </div>`
+            : ''}
+        </div>`;
+    }).join("");
+
+    // innerHTML 설정 후 버튼에 이벤트 리스너 직접 부착
+    // (inline onclick + this 는 Firefox에서 this 참조가 불안정하므로 사용하지 않음)
+    el.querySelectorAll('.hist-toggle-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        const detailEl = document.getElementById(btn.dataset.detailId);
+        if (!detailEl) return;
+        const isOpen = detailEl.classList.contains('open');
+        detailEl.classList.toggle('open', !isOpen);
+        btn.textContent = isOpen ? '상세 보기 ▼' : '접기 ▲';
+      });
+    });
   } catch (e) {
     el.innerHTML = `<span style="color:var(--sell)">${e.message}</span>`;
   }
@@ -729,6 +767,28 @@ async function loadRecsByDate() {
     renderRecList("rec-list", _recRecs, _recTheme);
   } catch (e) {
     list.innerHTML = `<span style="color:var(--sell)">${e.message}</span>`;
+  }
+}
+
+// ── 시장·테마 조합에 따른 종목수 자동 설정 ──────────────────────
+const _LIMIT_HINTS = {
+  9: { label: "버킷별 3~4개 균형 배분",  reason: "전체 시장: 버킷 풀 충분" },
+  5: { label: "테마 풀 최적",             reason: "테마 지정: 소규모 풀 안정" },
+};
+
+function autoSetRecLimit() {
+  const theme  = (document.getElementById("rec-theme")  || {}).value || "전체";
+  const sel    = document.getElementById("rec-limit");
+  const hint   = document.getElementById("rec-limit-hint");
+  if (!sel) return;
+
+  const optimal = (theme === "전체") ? 9 : 5;
+  sel.value = String(optimal);
+
+  if (hint) {
+    const h = _LIMIT_HINTS[optimal];
+    hint.textContent = `⚡ 자동: ${h.reason} → ${optimal}개 (${h.label})`;
+    hint.style.color = "var(--muted)";
   }
 }
 
@@ -1164,7 +1224,7 @@ async function runDataSourceCheck() {
   btn.disabled = true;
   btn.textContent = "⏳ 확인 중…";
   el.innerHTML = `<div style="color:var(--muted);font-size:.88em;padding:8px 0">
-    8개 소스를 병렬로 점검합니다. 최대 15초 소요될 수 있습니다…</div>`;
+    9개 소스를 병렬로 점검합니다. 최대 15초 소요될 수 있습니다…</div>`;
 
   try {
     const data = await api("/api/market/data-sources");
@@ -1200,6 +1260,7 @@ function _renderDataSources(data) {
   const categoryOrder = [
     "개별 주가 (OHLCV)", "개별 주가 (대체 소스)",
     "전종목 목록", "전종목 목록 (대체 소스)",
+    "전종목 시세 (거래량·등락률)",
     "시장 지수", "뉴스·감성 데이터", "AI / LLM",
     "공시 데이터 (선택)", "로컬 저장소",
   ];
@@ -1571,6 +1632,29 @@ document.addEventListener("DOMContentLoaded", async () => {
     _recTheme = theme;
     renderRecList("rec-list", _recRecs, _recTheme);
   });
+
+  // 시장·테마 변경 시 종목수 자동 설정
+  ["rec-theme", "rec-market"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("change", autoSetRecLimit);
+  });
+  autoSetRecLimit();  // 초기값 적용
+
+  // 사용자가 직접 종목수를 변경하면 힌트를 "수동 설정"으로 표시
+  const limitSel = document.getElementById("rec-limit");
+  const limitHint = document.getElementById("rec-limit-hint");
+  if (limitSel && limitHint) {
+    limitSel.addEventListener("change", () => {
+      const theme = (document.getElementById("rec-theme") || {}).value || "전체";
+      const optimal = (theme === "전체") ? 9 : 5;
+      if (parseInt(limitSel.value) !== optimal) {
+        limitHint.textContent = `✏️ 수동 설정 (권장: ${optimal}개)`;
+        limitHint.style.color = "var(--hold)";
+      } else {
+        autoSetRecLimit();
+      }
+    });
+  }
   loadOutcomes(90);
   initOutcomeDaysBtns();
 

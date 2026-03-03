@@ -176,10 +176,11 @@ class StockDataProvider:
     # ── 거래량·등락률 수집 (KRX 차단 대응) ──────────────────────────────
 
     def _get_volume_change_df(self, valid_codes: set) -> pd.DataFrame:
-        """당일 전종목 거래량+등락률 DataFrame 반환 (2단계 폴백, 10분 캐시).
+        """당일 전종목 거래량+등락률 DataFrame 반환 (3단계 폴백, 10분 캐시).
 
-        1차 — fdr.StockListing('KRX')           : 실시간 전종목 스냅샷 (KRX 세션 필요)
-        2차 — 종목 풀 개별 DataReader 배치 조회  : KRX 세션 정책 차단 시 Yahoo Finance 경유
+        1차 — fdr.StockListing('KRX')                 : 실시간 전종목 스냅샷 (KRX 세션 필요, 현재 차단)
+        2차 — 네이버 금융 시세 (BeautifulSoup 병렬)   : 전종목 code+거래량+등락률, 세션 불필요
+        3차 — 종목 풀 개별 DataReader 배치 조회       : Yahoo Finance 경유, 최대 100종목 (최후 폴백)
 
         get_market_ranking()과 get_market_buckets()가 동일 세션에서 연속 호출될 때
         Yahoo Finance 레이트 리밋을 피하기 위해 10분간 결과를 캐싱한다.
@@ -215,17 +216,137 @@ class StockDataProvider:
                 return result
         except Exception as e:
             logger.warning(
-                f"fdr.StockListing('KRX') 차단 — 개별 DataReader 배치 조회로 전환: {e}"
+                f"fdr.StockListing('KRX') 차단 — 네이버 금융 시세로 전환: {e}"
             )
 
-        # ── 2차: 개별 DataReader 배치 조회 (KRX 차단 대체) ───────────
+        # ── 2차: 네이버 금융 시세 (전종목 code+거래량+등락률) ────────
+        try:
+            result = self._fetch_naver_sise()
+            if not result.empty:
+                self._volume_cache = result
+                self._volume_timestamp = datetime.now()
+                return result
+            logger.warning("네이버 금융 시세 빈 결과 — 배치 DataReader로 전환")
+        except Exception as e:
+            logger.warning(f"네이버 금융 시세 실패 — 배치 DataReader로 전환: {e}")
+
+        # ── 3차: 개별 DataReader 배치 조회 (최후 폴백) ──────────────
         candidate_pool = self._get_bulk_candidate_pool(valid_codes)
-        logger.info(f"거래량 배치 조회: {len(candidate_pool)}종목 (KRX StockListing 차단 대체)")
+        logger.info(f"거래량 배치 조회: {len(candidate_pool)}종목 (최후 폴백)")
         result = self._fetch_bulk_volume_change(candidate_pool)
         if not result.empty:
             self._volume_cache = result
             self._volume_timestamp = datetime.now()
         return result
+
+    def _fetch_naver_sise(self, max_workers: int = 20, timeout: int = 30) -> pd.DataFrame:
+        """네이버 금융 시세 — 전종목 거래량·등락률 수집 (2차 폴백).
+
+        finance.naver.com/sise/sise_market_sum.naver 를 BeautifulSoup으로 병렬 파싱.
+        KOSPI(sosok=0)·KOSDAQ(sosok=1) 전 페이지를 동적으로 탐색하여 수집.
+        총 페이지 수는 .pgRR 링크에서 자동 감지하므로 상장 종목 수 변동에 대응.
+        ETF·ETN 등이 포함되나 _get_volume_change_df() 에서 valid_codes 필터로 제거됨.
+
+        Returns: DataFrame(code, volume, change_pct) or empty DataFrame
+        """
+        import requests
+        import re
+        import concurrent.futures as _cf
+        from bs4 import BeautifulSoup
+
+        _headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+
+        def _last_page(sosok: int) -> int:
+            r = requests.get(
+                'https://finance.naver.com/sise/sise_market_sum.naver',
+                params={'sosok': str(sosok), 'page': '1'},
+                headers=_headers, timeout=10,
+            )
+            soup = BeautifulSoup(r.text, 'html.parser')
+            pager = soup.select('.pgRR a')
+            if pager:
+                m = re.search(r'page=(\d+)', pager[-1]['href'])
+                if m:
+                    return int(m.group(1))
+            return 50  # 폴백 상한
+
+        def _col_indices(soup) -> tuple[int, int]:
+            """테이블 헤더에서 '등락률'·'거래량' 컬럼 인덱스를 탐지. 실패 시 기본값 반환."""
+            tbl = soup.select_one('table.type_2')
+            if not tbl:
+                return 4, 9
+            ths = tbl.select('thead th') or tbl.select('tr:first-child th')
+            chg_idx, vol_idx = 4, 9  # 현행 Naver 구조 기본값
+            for i, th in enumerate(ths):
+                txt = th.get_text(strip=True)
+                if '등락률' in txt:
+                    chg_idx = i
+                elif '거래량' in txt:
+                    vol_idx = i
+            return chg_idx, vol_idx
+
+        def _fetch_page(sosok: int, page: int) -> list:
+            r = requests.get(
+                'https://finance.naver.com/sise/sise_market_sum.naver',
+                params={'sosok': str(sosok), 'page': str(page)},
+                headers=_headers, timeout=10,
+            )
+            soup = BeautifulSoup(r.text, 'html.parser')
+            chg_idx, vol_idx = _col_indices(soup)
+            rows = []
+            for tr in soup.select('table.type_2 tbody tr'):
+                a = tr.select_one('td a[href*="code="]')
+                if not a:
+                    continue
+                code = a['href'].split('code=')[-1].strip()
+                tds = tr.select('td')
+                try:
+                    chg = tds[chg_idx].get_text(strip=True).replace('%', '').replace(',', '').replace('+', '')
+                    vol = tds[vol_idx].get_text(strip=True).replace(',', '')
+                    rows.append({
+                        'code':       code,
+                        'change_pct': float(chg) if chg else 0.0,
+                        'volume':     float(vol) if vol else 0.0,
+                    })
+                except (IndexError, ValueError):
+                    pass
+            return rows
+
+        try:
+            kospi_pages  = _last_page(0)
+            kosdaq_pages = _last_page(1)
+            tasks = (
+                [(0, p) for p in range(1, kospi_pages  + 1)] +
+                [(1, p) for p in range(1, kosdaq_pages + 1)]
+            )
+            logger.info(
+                f"네이버 금융 시세 수집 시작: KOSPI {kospi_pages}p + KOSDAQ {kosdaq_pages}p = {len(tasks)}p"
+            )
+            all_rows: list = []
+            pool = ThreadPoolExecutor(max_workers=max_workers)
+            try:
+                futures_map = {pool.submit(_fetch_page, s, p): (s, p) for s, p in tasks}
+                done, not_done = _cf.wait(futures_map.keys(), timeout=timeout)
+                for future in done:
+                    try:
+                        all_rows.extend(future.result())
+                    except Exception:
+                        pass
+                if not_done:
+                    logger.warning(f"네이버 금융 시세: {len(not_done)}페이지 타임아웃 — {len(all_rows)}행 수집")
+                    for f in not_done:
+                        f.cancel()
+            finally:
+                pool.shutdown(wait=False)
+
+            if not all_rows:
+                return pd.DataFrame()
+            df = pd.DataFrame(all_rows).drop_duplicates(subset='code').reset_index(drop=True)
+            logger.info(f"네이버 금융 시세 수집 완료: {len(df)}종목 (ETF 포함, valid_codes 필터 전)")
+            return df[['code', 'volume', 'change_pct']]
+        except Exception as e:
+            logger.warning(f"네이버 금융 시세 수집 실패: {e}")
+            return pd.DataFrame()
 
     def _get_bulk_candidate_pool(self, valid_codes: set, max_size: int = 100) -> List[str]:
         """배치 OHLCV 조회용 종목 풀 구성.
@@ -318,7 +439,7 @@ class StockDataProvider:
 
     def get_ohlcv(self, code: str, start: str = None, end: str = None, period: str = '1y') -> pd.DataFrame:
         """특정 종목의 OHLCV(시가, 고가, 저가, 종가, 거래량) 데이터를 반환 (5분 캐시 적용)"""
-        cache_key = f"{code}_{period}_{start}_{end}"
+        cache_key = f"{code}_{period}_{start or datetime.now().strftime('%Y-%m-%d')}_{end or ''}"
         now = datetime.now()
         if cache_key in self._ohlcv_cache:
             cached_ts, cached_df = self._ohlcv_cache[cache_key]
@@ -518,9 +639,17 @@ class StockDataProvider:
             df = self._get_volume_change_df(valid_codes)
 
             if df is None or df.empty or 'code' not in df.columns or 'volume' not in df.columns:
-                logger.warning("get_market_buckets: 거래량 데이터 없음 → get_market_ranking 폴백")
+                logger.warning("get_market_buckets: 거래량 데이터 없음 → 순위 기반 3버킷 근사 분류")
                 fallback = self.get_market_ranking(limit=200, market=market)
-                return {'volume': fallback, 'momentum': [], 'rebound': []}
+                n = len(fallback)
+                cut_v = max(1, n * 2 // 4)          # 상위 ~50% → volume
+                cut_m = max(cut_v + 1, n * 3 // 4)  # 다음 ~25% → momentum (위치 기반 근사)
+                # 나머지 ~25% → rebound (위치 기반 근사)
+                return {
+                    'volume':   fallback[:cut_v],
+                    'momentum': fallback[cut_v:cut_m],
+                    'rebound':  fallback[cut_m:],
+                }
 
             df['volume'] = pd.to_numeric(df['volume'], errors='coerce').fillna(0)
             df['change_pct'] = (
@@ -554,9 +683,16 @@ class StockDataProvider:
             return {'volume': bucket_a, 'momentum': bucket_b, 'rebound': bucket_c}
 
         except Exception as e:
-            logger.error(f"get_market_buckets 실패: {e} → get_market_ranking 폴백")
+            logger.error(f"get_market_buckets 실패: {e} → 순위 기반 3버킷 근사 분류")
             fallback = self.get_market_ranking(limit=200, market=market)
-            return {'volume': fallback, 'momentum': [], 'rebound': []}
+            n = len(fallback)
+            cut_v = max(1, n * 2 // 4)
+            cut_m = max(cut_v + 1, n * 3 // 4)
+            return {
+                'volume':   fallback[:cut_v],
+                'momentum': fallback[cut_v:cut_m],
+                'rebound':  fallback[cut_m:],
+            }
 
     def is_trading_day(self, d: Optional[date_type] = None) -> bool:
         """한국 증시 거래일인지 여부 반환.

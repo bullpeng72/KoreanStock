@@ -88,6 +88,12 @@ function toStrList(val) {
   return String(val);
 }
 
+function bucketBadge(bucket, label) {
+  if (!bucket || !label) return "";
+  const cls = { volume: "bucket-volume", momentum: "bucket-momentum", rebound: "bucket-rebound" };
+  return `<span class="bucket-badge ${cls[bucket] || "bucket-volume"}">${label}</span>`;
+}
+
 function stockSlide(rec) {
   const opinion  = rec.ai_opinion || {};
   const action   = opinion.action || "HOLD";
@@ -121,6 +127,7 @@ function stockSlide(rec) {
         <div class="sl-stock-header">
           <span class="sl-stock-name">${rec.name || rec.code}</span>
           <span class="sl-stock-code">${rec.code}</span>
+          ${bucketBadge(rec.bucket, rec.bucket_label)}
           <span class="${badgeClass(action)}">${action}</span>
           <div class="sl-stock-price">
             <div class="sl-price-val">₩${fmt(rec.current_price)}</div>

@@ -28,6 +28,10 @@
   --hm-mid-fg:  #3fb950;
   --hm-high-bg: #1a5e21;
   --hm-high-fg: #b6f0bc;
+  /* 버킷 배지 */
+  --bucket-vol-bg:  rgba(42,111,168,.22);  --bucket-vol-fg:  #7ec8e3;  --bucket-vol-bd:  rgba(42,111,168,.5);
+  --bucket-mom-bg:  rgba(42,138,42,.22);   --bucket-mom-fg:  #7ed87e;  --bucket-mom-bd:  rgba(42,138,42,.5);
+  --bucket-reb-bg:  rgba(200,130,30,.22);  --bucket-reb-fg:  #e8b84b;  --bucket-reb-bd:  rgba(200,130,30,.5);
 }
 
 /* ── 라이트 테마 오버라이드 ── */
@@ -57,6 +61,10 @@
   --hm-mid-fg:  #0d5e20;
   --hm-high-bg: #5cb875;
   --hm-high-fg: #ffffff;
+  /* 버킷 배지 — 라이트 테마: 진한 텍스트 + 연한 배경 */
+  --bucket-vol-bg:  rgba(5,80,174,.10);    --bucket-vol-fg:  #0550ae;  --bucket-vol-bd:  rgba(5,80,174,.35);
+  --bucket-mom-bg:  rgba(26,127,55,.10);   --bucket-mom-fg:  #1a7f37;  --bucket-mom-bd:  rgba(26,127,55,.35);
+  --bucket-reb-bg:  rgba(154,103,0,.10);   --bucket-reb-fg:  #7d5300;  --bucket-reb-bd:  rgba(154,103,0,.35);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -267,6 +275,18 @@ select option { background: var(--bg-dark); }
 .mkt-kospi  { background: var(--kospi-c); }
 .mkt-kosdaq { background: var(--kosdaq-c); }
 
+.bucket-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.68em;
+  font-weight: 700;
+  margin-left: 4px;
+}
+.bucket-volume   { background: var(--bucket-vol-bg); color: var(--bucket-vol-fg); border: 1px solid var(--bucket-vol-bd); }
+.bucket-momentum { background: var(--bucket-mom-bg); color: var(--bucket-mom-fg); border: 1px solid var(--bucket-mom-bd); }
+.bucket-rebound  { background: var(--bucket-reb-bg); color: var(--bucket-reb-fg); border: 1px solid var(--bucket-reb-bd); }
+
 /* ── 추천 카드 리스트 ─────────────────────────── */
 .rec-row {
   background: var(--bg-card);
@@ -366,12 +386,21 @@ select option { background: var(--bg-dark); }
 .wl-history.open { display: block; }
 
 .history-row {
-  padding: 8px 0;
+  padding: 10px 0;
   border-bottom: 1px solid var(--border);
   font-size: 0.82em;
 }
 
 .history-row:last-child { border-bottom: none; }
+
+.hist-detail {
+  display: none;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.hist-detail.open { display: block; }
 
 /* ── 백테스트 ─────────────────────────────────── */
 .strategy-desc { display: none; }

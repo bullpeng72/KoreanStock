@@ -216,7 +216,7 @@ class StockPredictionModel:
         # ── 볼린저 밴드 ───────────────────────────────
         bb_range = (df['bb_high'] - df['bb_low']).replace(0, np.nan)
         feat['bb_position']       = (df['close'] - df['bb_low']) / bb_range
-        feat['bb_width']          = bb_range / df['bb_mid']
+        feat['bb_width']          = (bb_range / df['bb_mid']).clip(0.01, 0.50)
 
         # ── 거래량 ────────────────────────────────────
         feat['vol_ratio']         = df['volume'] / df['vol_sma_20'].replace(0, np.nan)
@@ -244,7 +244,7 @@ class StockPredictionModel:
         feat['return_1m']         = df['close'].pct_change(20)
         feat['return_3m']         = df['close'].pct_change(60)
         feat['high_52w_ratio']    = df['close'] / df['close'].rolling(config.TRADING_DAYS_PER_YEAR, min_periods=60).max()
-        feat['mom_accel']         = feat['return_1m'] - feat['return_3m'] / 3.0
+        feat['mom_accel']         = (feat['return_1m'] - feat['return_3m']) / 3.0
 
         # ── 시장 상대강도 ─────────────────────────────
         if market_df is not None and not market_df.empty:
@@ -305,17 +305,18 @@ class StockPredictionModel:
 
         # ── 거시경제 3개 피처 ────────────────────────────────────
         if macro_df is not None and not macro_df.empty:
-            aligned = macro_df.reindex(feat.index, method='ffill')
-            feat['vix_level']     = aligned.get('vix_level',     pd.Series(dtype=float))
-            feat['vix_change_5d'] = aligned.get('vix_change_5d', pd.Series(dtype=float))
-            feat['sp500_1m']      = aligned.get('sp500_1m',      pd.Series(dtype=float))
+            aligned = macro_df.reindex(feat.index).ffill()
+            feat['vix_level']     = aligned['vix_level']     if 'vix_level'     in aligned.columns else 20.0
+            feat['vix_change_5d'] = aligned['vix_change_5d'] if 'vix_change_5d' in aligned.columns else 0.0
+            feat['sp500_1m']      = aligned['sp500_1m']      if 'sp500_1m'      in aligned.columns else 0.0
         else:
             feat['vix_level']     = 20.0
             feat['vix_change_5d'] = 0.0
             feat['sp500_1m']      = 0.0
 
-        # inf → NaN 치환 후 제거
-        return feat.replace([np.inf, -np.inf], np.nan).dropna()
+        # ML 피처(_FEATURE_COLS)만 선택 → 미사용 피처의 NaN이 유효 행을 제거하지 않도록
+        feat_ml = feat[[c for c in _FEATURE_COLS if c in feat.columns]]
+        return feat_ml.replace([np.inf, -np.inf], np.nan).dropna()
 
     def predict(self, code: str, df: pd.DataFrame,
                 df_with_indicators: pd.DataFrame = None,

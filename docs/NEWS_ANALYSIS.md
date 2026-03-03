@@ -251,17 +251,17 @@ get_sentiment_score(stock_name, stock_code)
 ### 캐시 키
 
 ```
-cache_key = "{종목명}_{YYYY-MM-DD}"
-예: "삼성전자_2026-02-27"
+cache_key = "{종목명}_{YYYY-MM-DD_HH}"
+예: "삼성전자_2026-02-27_09"
 ```
 
-날짜가 포함되어 별도 TTL 없이 자동 만료. 날짜가 바뀌면 자동으로 재수집.
+시간 단위 TTL — 같은 시간대 중복 호출 방지. 시간이 바뀌면 자동 재수집하여 장중 새 공시 반영 가능.
 
 ### SQLite 테이블 (`sentiment_cache`)
 
 ```sql
 CREATE TABLE sentiment_cache (
-    cache_key   TEXT PRIMARY KEY,   -- "{종목명}_{날짜}"
+    cache_key   TEXT PRIMARY KEY,   -- "{종목명}_{날짜_시}"
     result_json TEXT NOT NULL,      -- JSON 직렬화된 분석 결과
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

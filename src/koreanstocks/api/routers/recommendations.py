@@ -56,7 +56,7 @@ def recommendation_history(days: int = Query(14, ge=1, le=90), db=Depends(get_db
 @router.post("/recommendations/run", status_code=202)
 def run_recommendations(
     background_tasks: BackgroundTasks,
-    limit: int = Query(5),
+    limit: int = Query(9),
     market: str = Query("ALL"),
     theme: str = Query("전체", description="테마: 전체 | AI/인공지능 | 반도체 | 이차전지 | 제약/바이오 | 로봇/자동화"),
     force: bool = Query(False, description="오늘 결과가 있어도 강제 재분석"),

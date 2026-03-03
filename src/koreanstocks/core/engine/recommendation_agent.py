@@ -1,9 +1,12 @@
 import json
-import pandas as pd
 import logging
+from collections import Counter
 from datetime import date
 from typing import List, Dict, Any, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
+
+import pandas as pd
+
 from koreanstocks.core.data.provider import data_provider
 from koreanstocks.core.engine.analysis_agent import analysis_agent
 from koreanstocks.core.data.database import db_manager
@@ -52,9 +55,10 @@ def _apply_bucket_quota(
 ) -> List[Dict[str, Any]]:
     """버킷별 쿼터를 보장하며 최종 종목 선정.
 
-    각 버킷에서 비율에 따라 우선 선정한 뒤,
-    미달 버킷의 슬롯은 전체 점수 순으로 보충한다.
-    섹터 편중도 버킷 내에서 max_per_sector(~33%)로 제한.
+    1단계: 각 버킷 자체 후보에서 쿼터만큼 선정 (섹터 다양성 반영).
+    2단계: 쿼터 미달 버킷은 교차 버킷 잉여 후보로 보충 + 버킷 재태깅
+           → 최종 결과에 3개 버킷이 모두 대표되도록 보장.
+    3단계: 전체 limit 미달이면 점수 순으로 보충.
     """
     max_per_sector = max(1, round(limit / 3))
 
@@ -80,11 +84,10 @@ def _apply_bucket_quota(
         for rec in candidates:
             if rec['code'] in selected_codes:
                 continue
-            sector = (rec.get('sector') or '').strip()
-            if not sector or sector_count.get(sector, 0) < max_per_sector:
+            sector = (rec.get('sector') or '').strip() or '__unknown__'
+            if sector_count.get(sector, 0) < max_per_sector:
                 picked.append(rec)
-                if sector:
-                    sector_count[sector] = sector_count.get(sector, 0) + 1
+                sector_count[sector] = sector_count.get(sector, 0) + 1
             else:
                 deferred.append(rec)
             if len(picked) >= quota:
@@ -98,7 +101,8 @@ def _apply_bucket_quota(
                         break
         return picked
 
-    # 버킷 순서대로 쿼터 선정
+    # ── 1단계: 버킷별 자체 후보 선정 ──────────────────────────────
+    bucket_shortfall: Dict[str, int] = {}
     for bucket_name, quota in quotas.items():
         bucket_results = sorted(
             [r for r in results if r.get('bucket') == bucket_name],
@@ -108,7 +112,34 @@ def _apply_bucket_quota(
         selected.extend(picks)
         selected_codes.update(r['code'] for r in picks)
 
-    # 전체 limit 미달 시 남은 종목으로 보충 (점수 순)
+        shortfall = quota - len(picks)
+        if shortfall > 0:
+            bucket_shortfall[bucket_name] = shortfall
+            logger.warning(
+                f"버킷 '{bucket_name}' 후보 부족: {len(picks)}/{quota} "
+                f"→ {shortfall}개 교차 버킷에서 보충 예정"
+            )
+
+    # ── 2단계: 미달 버킷 교차 보충 (잉여 후보를 재태깅) ───────────
+    for bucket_name, needed in bucket_shortfall.items():
+        cross_pool = sorted(
+            [r for r in results if r['code'] not in selected_codes],
+            key=_composite_score, reverse=True,
+        )
+        cross_picks = _pick(cross_pool, needed)
+        for r in cross_picks:
+            r['bucket'] = bucket_name  # 미달 버킷으로 재태깅
+        selected.extend(cross_picks)
+        selected_codes.update(r['code'] for r in cross_picks)
+        if cross_picks:
+            logger.info(
+                f"버킷 '{bucket_name}' 교차 보충 완료: "
+                f"{len(cross_picks)}종목 (재태깅)"
+            )
+        else:
+            logger.warning(f"버킷 '{bucket_name}' 교차 보충 불가 (전체 후보 소진)")
+
+    # ── 3단계: 전체 limit 미달 시 잔여 종목으로 보충 (점수 순) ────
     if len(selected) < limit:
         remaining = sorted(
             [r for r in results if r['code'] not in selected_codes],
@@ -138,6 +169,9 @@ class RecommendationAgent:
           rebound  (25%) — 거래량 상위 중 하락 반등 후보
 
         분석 풀: min(limit * 8, 80)  →  limit=5: 40개, limit=10: 80개
+
+        최종 추천에서 3개 버킷이 모두 대표되도록 쿼터를 보장한다.
+        후보 부족 버킷은 교차 버킷 잉여 종목으로 보충 후 재태깅.
         """
         logger.info(f"Generating recommendations (Market: {market}, Theme: {theme_label})...")
 
@@ -152,8 +186,17 @@ class RecommendationAgent:
             ranked      = data_provider.get_market_ranking(limit=200, market=market)
             candidate_codes = [c for c in ranked if c in theme_codes]
             candidate_codes += [c for c in theme_df['code'].tolist() if c not in set(candidate_codes)]
-            # 테마 모드: 버킷 없이 단일 풀로 처리 (bucket='volume' 태그)
-            code_bucket: Dict[str, str] = {c: 'volume' for c in candidate_codes}
+
+            # 테마 모드에서도 버킷 분류 적용
+            # 거래량·등락률 기반 버킷 맵을 가져와 테마 종목에 매핑
+            market_buckets = data_provider.get_market_buckets(market)
+            bucket_map: Dict[str, str] = {}
+            for bname, codes in market_buckets.items():
+                for code in codes:
+                    if code not in bucket_map:
+                        bucket_map[code] = bname
+            # 버킷 맵에 없는 테마 종목은 volume으로 기본 배정
+            code_bucket: Dict[str, str] = {c: bucket_map.get(c, 'volume') for c in candidate_codes}
         else:
             # 버킷 기반 후보군 구성
             buckets = data_provider.get_market_buckets(market)
@@ -175,6 +218,15 @@ class RecommendationAgent:
         if not candidate_codes:
             return []
 
+        # 후보군 버킷 분포 로깅
+        pool_dist = Counter(code_bucket[c] for c in candidate_codes)
+        logger.info(
+            f"분석 후보군 {len(candidate_codes)}종목 "
+            f"(volume={pool_dist.get('volume',0)}, "
+            f"momentum={pool_dist.get('momentum',0)}, "
+            f"rebound={pool_dist.get('rebound',0)})"
+        )
+
         # ── 2. 종목명 해석 ──────────────────────────────────────────
         candidates: List[Tuple[str, str]] = []
         for code in candidate_codes:
@@ -184,7 +236,7 @@ class RecommendationAgent:
 
         # ── 3. 병렬 분석 ────────────────────────────────────────────
         results: List[Dict[str, Any]] = []
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        with ThreadPoolExecutor(max_workers=10) as executor:
             futures = {
                 executor.submit(self._analyze_candidate, code, nm): code
                 for code, nm in candidates
@@ -197,6 +249,7 @@ class RecommendationAgent:
                         res['bucket'] = code_bucket.get(code, 'volume')
                         results.append(res)
                 except FuturesTimeoutError:
+                    future.cancel()
                     logger.warning(f"Analysis timeout: {code}, skipping")
                 except Exception as e:
                     logger.warning(f"Analysis error for {code}: {e}")
@@ -204,6 +257,15 @@ class RecommendationAgent:
         if not results:
             logger.warning("No successful analyses to recommend.")
             return []
+
+        # 분석 완료 버킷 분포 로깅
+        result_dist = Counter(r.get('bucket', '?') for r in results)
+        logger.info(
+            f"분석 완료 {len(results)}종목 "
+            f"(volume={result_dist.get('volume',0)}, "
+            f"momentum={result_dist.get('momentum',0)}, "
+            f"rebound={result_dist.get('rebound',0)})"
+        )
 
         # ── 4. 버킷 쿼터 + 섹터 다양성으로 최종 선정 ───────────────
         final_recs = _apply_bucket_quota(results, limit)
@@ -213,6 +275,15 @@ class RecommendationAgent:
             rec['composite_score']  = round(_composite_score(rec), 2)
             rec['bucket_label']     = BUCKET_LABELS.get(rec.get('bucket', 'volume'), '')
         self._save_to_db(final_recs)
+
+        # 최종 버킷 분포 로깅
+        final_dist = Counter(r.get('bucket', '?') for r in final_recs)
+        logger.info(
+            f"최종 추천 {len(final_recs)}종목 버킷 분포: "
+            f"volume={final_dist.get('volume',0)}, "
+            f"momentum={final_dist.get('momentum',0)}, "
+            f"rebound={final_dist.get('rebound',0)}"
+        )
 
         return final_recs
 

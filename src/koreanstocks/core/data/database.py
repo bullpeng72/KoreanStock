@@ -82,6 +82,7 @@ class DatabaseManager:
             for migration in [
                 "ALTER TABLE recommendations ADD COLUMN detail_json TEXT",
                 "ALTER TABLE recommendations ADD COLUMN session_date DATE",
+                "ALTER TABLE analysis_history ADD COLUMN detail_json TEXT",
             ]:
                 try:
                     cursor.execute(migration)
@@ -195,39 +196,57 @@ class DatabaseManager:
             logger.warning(f"sentiment_cache 저장 실패: {e}")
 
     def save_analysis_history(self, res: Dict):
-        """분석 결과 이력 저장"""
+        """분석 결과 이력 저장 (요약 + 전체 JSON)"""
+        try:
+            detail_json = json.dumps(res, ensure_ascii=False, default=str)
+        except Exception:
+            detail_json = None
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO analysis_history (code, tech_score, ml_score, sentiment_score, action, summary)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO analysis_history
+                    (code, tech_score, ml_score, sentiment_score, action, summary, detail_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (
-                res['code'], 
-                res['tech_score'], 
-                res['ml_score'], 
+                res['code'],
+                res['tech_score'],
+                res['ml_score'],
                 res['sentiment_score'],
                 res['ai_opinion']['action'],
-                res['ai_opinion']['summary']
+                res['ai_opinion']['summary'],
+                detail_json,
             ))
             conn.commit()
 
     def get_analysis_history(self, code: str, limit: int = 5) -> List[Dict]:
-        """특정 종목의 최근 분석 이력 조회"""
+        """특정 종목의 최근 분석 이력 조회 (요약 + 전체 상세 포함)"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT tech_score, ml_score, sentiment_score, action, summary, created_at 
-                FROM analysis_history 
-                WHERE code = ? 
+                SELECT tech_score, ml_score, sentiment_score, action, summary,
+                       created_at, detail_json
+                FROM analysis_history
+                WHERE code = ?
                 ORDER BY created_at DESC LIMIT ?
             ''', (code, limit))
             rows = cursor.fetchall()
-            return [
-                {
-                    'tech_score': r[0], 'ml_score': r[1], 'sentiment_score': r[2],
-                    'action': r[3], 'summary': r[4], 'date': r[5]
-                } for r in rows
-            ]
+            result = []
+            for r in rows:
+                item: Dict = {
+                    'tech_score':      r[0],
+                    'ml_score':        r[1],
+                    'sentiment_score': r[2],
+                    'action':          r[3],
+                    'summary':         r[4],
+                    'date':            r[5],
+                }
+                if r[6]:
+                    try:
+                        item['detail'] = json.loads(r[6])
+                    except Exception:
+                        pass
+                result.append(item)
+            return result
 
     def get_recommendations_by_date(self, date_str: str) -> List[Dict]:
         """특정 날짜의 추천 종목 목록 반환 (detail_json 우선, 없으면 기본 구조로 폴백)"""

@@ -120,7 +120,10 @@
 
     <!-- 설정 / 실행 -->
     <div class="card">
-      <div class="card-title">⚙️ 분석 설정</div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:12px">
+        <div class="card-title" style="margin:0">⚙️ 분석 설정</div>
+        <span id="rec-limit-hint" style="font-size:.75em;color:var(--muted)"></span>
+      </div>
       <div class="flex-row">
         <div>
           <label class="inline-label">시장</label>
@@ -144,9 +147,8 @@
         <div>
           <label class="inline-label">종목 수</label>
           <select id="rec-limit">
-            <option value="3">3</option>
-            <option value="5" selected>5</option>
-            <option value="10">10</option>
+            <option value="5">5개</option>
+            <option value="9" selected>9개</option>
           </select>
         </div>
         <button class="btn btn-primary" onclick="runRecommendations()" style="align-self:flex-end">🔄 새로 분석 실행</button>

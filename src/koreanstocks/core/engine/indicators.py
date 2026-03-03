@@ -103,23 +103,23 @@ class IndicatorCalculator:
                 try:
                     df['sqzmi'] = _FTA.SQZMI(df_f).fillna(0)
                 except Exception as e:
-                    logger.debug(f"SQZMI 계산 실패: {e}")
+                    logger.warning(f"SQZMI 계산 실패: {e}")
                     df['sqzmi'] = 0.0
                 try:
                     df['vzo'] = _FTA.VZO(df_f).fillna(0)
                 except Exception as e:
-                    logger.debug(f"VZO 계산 실패: {e}")
+                    logger.warning(f"VZO 계산 실패: {e}")
                     df['vzo'] = 0.0
                 try:
                     df['fisher'] = _FTA.FISH(df_f).fillna(0).clip(-5, 5)
                 except Exception as e:
-                    logger.debug(f"Fisher Transform 계산 실패: {e}")
+                    logger.warning(f"Fisher Transform 계산 실패: {e}")
                     df['fisher'] = 0.0
                 try:
                     wf = _FTA.WILLIAMS_FRACTAL(df_f)
                     df['bullish_fractal'] = wf['BullishFractal'].fillna(0)
                 except Exception as e:
-                    logger.debug(f"Williams Fractal 계산 실패: {e}")
+                    logger.warning(f"Williams Fractal 계산 실패: {e}")
                     df['bullish_fractal'] = 0.0
             else:
                 df['sqzmi']          = 0.0

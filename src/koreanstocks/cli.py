@@ -191,7 +191,7 @@ def serve(
 @app.command()
 def recommend(
     market: str = typer.Option("ALL", help="시장 필터: [cyan]ALL[/cyan] | KOSPI | KOSDAQ"),
-    limit: int = typer.Option(5, help="추천 종목 수 (1~30)"),
+    limit: int = typer.Option(9, help="추천 종목 수 (1~30)"),
 ):
     """
     [bold]추천 종목 분석 실행[/bold] — GitHub Actions 자동화 및 수동 실행용
@@ -209,7 +209,7 @@ def recommend(
     """
     from koreanstocks.core.engine.scheduler import run_daily_update
     typer.echo(f"일일 업데이트 실행 (market={market}, limit={limit})...")
-    run_daily_update()
+    run_daily_update(limit=limit)
     typer.echo("완료.")
 
 
