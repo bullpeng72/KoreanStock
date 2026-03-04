@@ -1,7 +1,7 @@
 # 뉴스 감성 분석 시스템 기술 문서
 
-> Korean Stocks AI/ML Analysis System `v0.3.5`
-> 최종 업데이트: 2026-03-03
+> Korean Stocks AI/ML Analysis System `v0.3.6`
+> 최종 업데이트: 2026-03-04
 
 ---
 

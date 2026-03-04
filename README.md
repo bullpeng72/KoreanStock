@@ -1,6 +1,6 @@
 # 📈 Korean Stocks AI/ML Analysis System
 
-![version](https://img.shields.io/badge/version-0.3.5-blue)
+![version](https://img.shields.io/badge/version-0.3.6-blue)
 
 > **KOSPI · KOSDAQ 종목을 AI와 머신러닝으로 분석하는 자동화 투자 보조 플랫폼**
 
@@ -765,6 +765,12 @@ flowchart TD
 ---
 
 ## 📝 변경 이력
+
+### v0.3.6 (2026-03-04)
+
+- 🐛 `/api/market` NaN → JSON 직렬화 오류 수정 (`market.py` 방어 레이어 + `provider.py` 근본 원인 수정)
+- 🔧 모델 경로 `pathlib.Path` 전환 (`prediction_model.py`, `trainer.py`) — CLAUDE.md 코딩 규칙 준수
+- 🔧 버킷 상수 `core/constants.py`로 통합 (`BUCKET_LABELS`, `BUCKET_RATIOS`, `BUCKET_DEFAULT`) — 3곳 중복 제거
 
 ### v0.3.5 (2026-03-03)
 

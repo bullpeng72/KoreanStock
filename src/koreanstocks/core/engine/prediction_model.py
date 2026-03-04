@@ -6,8 +6,8 @@ from sklearn.preprocessing import StandardScaler
 import joblib
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, List, Optional, Any
-import os
 import json
 
 from koreanstocks.core.config import config
@@ -46,8 +46,8 @@ class StockPredictionModel:
         self.model_weights = {}   # name → 1/RMSE 가중치 (성능 기반 앙상블용)
         self.calibrations: Dict[str, list] = {}  # name → 101분위수 배열 (predict_proba → 0~100)
         # 절대 경로 설정
-        self.model_dir = os.path.join(config.BASE_DIR, "models", "saved", "prediction_models")
-        self.params_dir = os.path.join(config.BASE_DIR, "models", "saved", "model_params")
+        self.model_dir = Path(config.BASE_DIR) / "models" / "saved" / "prediction_models"
+        self.params_dir = Path(config.BASE_DIR) / "models" / "saved" / "model_params"
         # 시장 지수 당일 캐시 (KS11/KQ11 별도 캐싱, 상대강도 피처용)
         self._market_cache: Dict[str, Any] = {}  # symbol → {'df': DataFrame, 'date': str}
         self._load_existing_models()
@@ -56,23 +56,23 @@ class StockPredictionModel:
         """저장된 모델 및 스케일러 로드 (한 쌍이 모두 존재할 때만 활성화)"""
         model_names = ['random_forest', 'gradient_boosting', 'xgboost']
         
-        if not os.path.exists(self.model_dir):
+        if not self.model_dir.exists():
             logger.error(f"Model directory not found: {self.model_dir}")
             return
 
         for name in model_names:
-            model_path = os.path.join(self.model_dir, f"{name}_model.pkl")
-            scaler_path = os.path.join(self.model_dir, f"{name}_scaler.pkl")
-            
+            model_path = self.model_dir / f"{name}_model.pkl"
+            scaler_path = self.model_dir / f"{name}_scaler.pkl"
+
             # 모델과 스케일러가 모두 존재해야 로드 (정합성 유지)
-            if os.path.exists(model_path) and os.path.exists(scaler_path):
+            if model_path.exists() and scaler_path.exists():
                 try:
                     loaded_model = joblib.load(model_path)
                     loaded_scaler = joblib.load(scaler_path)
 
                     # params JSON에서 품질 지표 확인 — 기준 미달 모델은 로드 거부
-                    params_path = os.path.join(self.params_dir, f"{name}_params.json")
-                    if os.path.exists(params_path):
+                    params_path = self.params_dir / f"{name}_params.json"
+                    if params_path.exists():
                         with open(params_path, 'r', encoding='utf-8') as pf:
                             meta = json.load(pf)
                         model_type = meta.get("model_type", "regression")
@@ -109,8 +109,8 @@ class StockPredictionModel:
                     logger.error(f"❌ Error loading {name} package: {e}")
             else:
                 missing = []
-                if not os.path.exists(model_path): missing.append("model.pkl")
-                if not os.path.exists(scaler_path): missing.append("scaler.pkl")
+                if not model_path.exists(): missing.append("model.pkl")
+                if not scaler_path.exists(): missing.append("scaler.pkl")
                 logger.warning(f"⚠️ Skipping {name}: Missing {', '.join(missing)}")
 
 

@@ -1,5 +1,6 @@
 """시장 현황 라우터 — GET /api/market"""
 import logging
+import math
 import os
 import time
 from datetime import datetime, timedelta
@@ -9,6 +10,17 @@ from koreanstocks.api.dependencies import get_data_provider
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["market"])
+
+
+def _safe_num(val, default=0):
+    """NaN / Inf → JSON 안전 기본값으로 변환"""
+    if val is None:
+        return default
+    try:
+        f = float(val)
+        return default if (math.isnan(f) or math.isinf(f)) else f
+    except (TypeError, ValueError):
+        return default
 
 
 # ── 데이터 소스 헬스체크 헬퍼 ──────────────────────────────────────────────
@@ -257,9 +269,9 @@ def get_market(dp=Depends(get_data_provider)):
     try:
         indices = dp.get_market_indices()
         return {
-            "KOSPI":  {"name": "KOSPI",  "close": indices.get("KOSPI", 0),   "change": indices.get("KOSPI_change", 0)},
-            "KOSDAQ": {"name": "KOSDAQ", "close": indices.get("KOSDAQ", 0),  "change": indices.get("KOSDAQ_change", 0)},
-            "USDKRW": {"name": "USD/KRW","close": indices.get("USD_KRW", 0), "change": None},
+            "KOSPI":  {"name": "KOSPI",  "close": _safe_num(indices.get("KOSPI")),         "change": _safe_num(indices.get("KOSPI_change"))},
+            "KOSDAQ": {"name": "KOSDAQ", "close": _safe_num(indices.get("KOSDAQ")),        "change": _safe_num(indices.get("KOSDAQ_change"))},
+            "USDKRW": {"name": "USD/KRW","close": _safe_num(indices.get("USD_KRW")),       "change": None},
         }
     except Exception as e:
         logger.error(f"시장 지수 조회 오류: {e}")

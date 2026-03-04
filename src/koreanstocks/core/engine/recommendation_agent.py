@@ -10,22 +10,9 @@ import pandas as pd
 from koreanstocks.core.data.provider import data_provider
 from koreanstocks.core.engine.analysis_agent import analysis_agent
 from koreanstocks.core.data.database import db_manager
+from koreanstocks.core.constants import BUCKET_DEFAULT, BUCKET_LABELS, BUCKET_RATIOS as _BUCKET_RATIOS
 
 logger = logging.getLogger(__name__)
-
-# 버킷 메타데이터 (이름 → 한국어 레이블)
-BUCKET_LABELS: Dict[str, str] = {
-    'volume':   '거래량 상위',
-    'momentum': '상승 모멘텀',
-    'rebound':  '반등 후보',
-}
-
-# 버킷별 분석 풀 비율
-_BUCKET_RATIOS = [
-    ('volume',   0.40),
-    ('momentum', 0.35),
-    ('rebound',  0.25),
-]
 
 
 def _composite_score(x: Dict[str, Any]) -> float:
@@ -195,8 +182,8 @@ class RecommendationAgent:
                 for code in codes:
                     if code not in bucket_map:
                         bucket_map[code] = bname
-            # 버킷 맵에 없는 테마 종목은 volume으로 기본 배정
-            code_bucket: Dict[str, str] = {c: bucket_map.get(c, 'volume') for c in candidate_codes}
+            # 버킷 맵에 없는 테마 종목은 기본 버킷으로 배정
+            code_bucket: Dict[str, str] = {c: bucket_map.get(c, BUCKET_DEFAULT) for c in candidate_codes}
         else:
             # 버킷 기반 후보군 구성
             buckets = data_provider.get_market_buckets(market)
@@ -246,7 +233,7 @@ class RecommendationAgent:
                 try:
                     res = future.result(timeout=60)
                     if res is not None:
-                        res['bucket'] = code_bucket.get(code, 'volume')
+                        res['bucket'] = code_bucket.get(code, BUCKET_DEFAULT)
                         results.append(res)
                 except FuturesTimeoutError:
                     future.cancel()
@@ -273,7 +260,7 @@ class RecommendationAgent:
             rec['theme']            = theme_label
             rec['analysis_market']  = market
             rec['composite_score']  = round(_composite_score(rec), 2)
-            rec['bucket_label']     = BUCKET_LABELS.get(rec.get('bucket', 'volume'), '')
+            rec['bucket_label']     = BUCKET_LABELS.get(rec.get('bucket', BUCKET_DEFAULT), '')
         self._save_to_db(final_recs)
 
         # 최종 버킷 분포 로깅

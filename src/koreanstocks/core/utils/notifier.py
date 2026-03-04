@@ -4,6 +4,7 @@ from collections import defaultdict
 from datetime import date
 from typing import Dict
 from koreanstocks.core.config import config
+from koreanstocks.core.constants import BUCKET_DEFAULT
 import os
 
 logger = logging.getLogger(__name__)
@@ -153,10 +154,10 @@ class TelegramNotifier:
         sep   = "─" * 26
         blocks = [f"📊 <b>AI 추천 리포트 — {today}</b>  ({len(rec_list)}종목)\n{sep}"]
 
-        # 버킷별 그룹화 (bucket 필드 없는 종목은 volume으로 처리)
+        # 버킷별 그룹화 (bucket 필드 없는 종목은 기본 버킷으로 처리)
         by_bucket: Dict[str, list] = defaultdict(list)
         for rec in rec_list:
-            by_bucket[rec.get('bucket', 'volume')].append(rec)
+            by_bucket[rec.get('bucket', BUCKET_DEFAULT)].append(rec)
 
         i = 1
         for bucket_name, header in self._BUCKET_SECTION.items():

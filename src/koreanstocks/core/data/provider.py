@@ -517,14 +517,18 @@ class StockDataProvider:
             try:
                 df = fdr.DataReader(symbol, start_str)
                 if not df.empty:
-                    indices[name] = float(df.iloc[-1]['Close'])
+                    close_val = df.iloc[-1]['Close']
+                    if pd.isna(close_val):
+                        continue
+                    indices[name] = float(close_val)
                     # Change 컬럼이 없는 소스(Yahoo Finance)도 있으므로 전일비 직접 계산
                     if len(df) >= 2:
                         prev = float(df.iloc[-2]['Close'])
                         curr = float(df.iloc[-1]['Close'])
-                        indices[f"{name}_change"] = (curr - prev) / prev if prev else 0.0
+                        indices[f"{name}_change"] = (curr - prev) / prev if (prev and not np.isnan(prev) and not np.isnan(curr)) else 0.0
                     else:
-                        indices[f"{name}_change"] = float(df.iloc[-1].get('Change', 0.0))
+                        raw_chg = df.iloc[-1].get('Change', 0.0)
+                        indices[f"{name}_change"] = 0.0 if pd.isna(raw_chg) else float(raw_chg)
             except Exception as e:
                 logger.error(f"Error fetching market indices [{symbol}]: {e}")
 
