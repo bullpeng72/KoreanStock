@@ -126,7 +126,7 @@ KoreanStocks/
 ├── requirements.txt                     # 개발/테스트 전용 (pytest 등)
 ├── src/
 │   └── koreanstocks/
-│       ├── __init__.py                  # VERSION = "0.3.5"
+│       ├── __init__.py                  # VERSION = "0.3.6"
 │       ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init/sync/home/outcomes)
 │       ├── api/
 │       │   ├── app.py                   # FastAPI 앱 팩토리, StaticFiles 마운트
