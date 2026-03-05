@@ -44,3 +44,6 @@ models/saved/model_params/*.json
 data/storage/pykrx_cache_*.pkl
 data/storage/dart_corp_cache.json
 
+# CatBoost training logs (auto-generated, not needed in repo)
+catboost_info/
+
