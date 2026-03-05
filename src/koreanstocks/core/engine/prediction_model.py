@@ -18,11 +18,11 @@ logger = logging.getLogger(__name__)
 
 # 예측 시 사용할 피처 목록 — trainer.py BASE_FEATURE_COLS와 동기화 필수 (18개)
 _FEATURE_COLS = [
-    'atr_ratio', 'adx', 'adx_di_diff', 'bb_width',
+    'atr_ratio', 'adx', 'bb_width', 'bb_position',
     'rs_vs_mkt_3m', 'high_52w_ratio', 'mom_accel',
     'macd_diff', 'macd_slope_5d', 'price_sma_5_ratio',
     'fisher', 'bullish_fractal_5d',
-    'cmf', 'vzo', 'vol_ratio',
+    'mfi', 'vzo', 'low_52w_ratio',
     'vix_level', 'vix_change_5d', 'sp500_1m',
 ]
 # 구버전(22/34/37/23/25) 구분용 문서 상수 (코드 로직에서는 _FEATURE_COLS 컬럼명 선택 사용)
@@ -54,7 +54,7 @@ class StockPredictionModel:
 
     def _load_existing_models(self):
         """저장된 모델 및 스케일러 로드 (한 쌍이 모두 존재할 때만 활성화)"""
-        model_names = ['random_forest', 'gradient_boosting', 'xgboost']
+        model_names = ['random_forest', 'gradient_boosting', 'lightgbm', 'catboost', 'xgboost_ranker']
         
         if not self.model_dir.exists():
             logger.error(f"Model directory not found: {self.model_dir}")
@@ -76,7 +76,7 @@ class StockPredictionModel:
                         with open(params_path, 'r', encoding='utf-8') as pf:
                             meta = json.load(pf)
                         model_type = meta.get("model_type", "regression")
-                        if model_type == "binary_classifier":
+                        if model_type in ("binary_classifier", "ranker"):
                             auc = float(meta.get("test_auc", 0.0))
                             if auc < _MIN_MODEL_AUC:
                                 logger.warning(
@@ -90,7 +90,8 @@ class StockPredictionModel:
                             cal = meta.get("calibration")
                             if cal and len(cal) == 101:
                                 self.calibrations[name] = cal
-                            logger.info(f"✅ Loaded classifier: {name} (auc={auc:.4f}, weight={self.model_weights[name]:.4f})")
+                            label = "ranker" if model_type == "ranker" else "classifier"
+                            logger.info(f"✅ Loaded {label}: {name} (auc={auc:.4f}, weight={self.model_weights[name]:.4f})")
                         else:
                             # 구버전 regression 모델 — R² 기준
                             r2   = float(meta.get("test_r2",   0.0))
@@ -221,6 +222,16 @@ class StockPredictionModel:
         # ── 거래량 ────────────────────────────────────
         feat['vol_ratio']         = df['volume'] / df['vol_sma_20'].replace(0, np.nan)
 
+        # vol_zscore: 거래량 표준화 (-3~+3)
+        vol_ma  = df['volume'].rolling(20).mean()
+        vol_std = df['volume'].rolling(20).std().replace(0, np.nan)
+        feat['vol_zscore'] = ((df['volume'] - vol_ma) / vol_std).clip(-3, 3)
+
+        # low_52w_ratio: 52주 저가 대비 반등 위치 (≥ 1.0)
+        feat['low_52w_ratio'] = (
+            df['close'] / df['close'].rolling(config.TRADING_DAYS_PER_YEAR, min_periods=60).min()
+        )
+
         # ── 모멘텀 (오실레이터) ───────────────────────
         if 'stoch_k' in df.columns:
             feat['stoch_k']       = df['stoch_k']
@@ -231,7 +242,7 @@ class StockPredictionModel:
 
         # ── 변동성 ────────────────────────────────────
         if 'atr' in df.columns:
-            feat['atr_ratio']     = df['atr'] / df['close']
+            feat['atr_ratio']     = (df['atr'] / df['close']).rolling(60).rank(pct=True)
 
         # ── OBV 변화율 ────────────────────────────────
         if 'obv' in df.columns:
@@ -371,8 +382,13 @@ class StockPredictionModel:
                         p = float(np.clip(np.searchsorted(cal, p_raw), 0, 100))
                     else:
                         p = p_raw * 100.0
-                else:
-                    p = float(model.predict(x)[0])
+                else:  # ranker (predict_proba 없음)
+                    p_raw = float(model.predict(x)[0])
+                    cal = self.calibrations.get(name)
+                    if cal:
+                        p = float(np.clip(np.searchsorted(cal, p_raw), 0, 100))
+                    else:
+                        p = float(np.clip(p_raw, 0.0, 100.0))
                 w = self.model_weights.get(name, 0.05)
                 weighted_sum += p * w
                 total_weight += w

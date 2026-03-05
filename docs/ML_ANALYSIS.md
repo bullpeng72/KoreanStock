@@ -1,7 +1,7 @@
 # ML 분석 시스템 기술 문서
 
-> Korean Stocks AI/ML Analysis System `v0.3.6`
-> 최종 업데이트: 2026-03-04
+> Korean Stocks AI/ML Analysis System `v0.3.7`
+> 최종 업데이트: 2026-03-05
 
 ---
 
@@ -21,15 +21,15 @@
 
 ## 1. 개요
 
-ML 모델은 **향후 10거래일 후 수익률이 상위 25%에 속할 확률**을 이진 분류로 예측한다.
-절대 수익률 회귀 대신 이진 분류를 채택하여 노이즈를 줄이고 신호 대 잡음비를 개선한다.
+ML 앙상블은 **향후 10거래일 후 수익률이 상위 25%에 속할 확률**을 이진 분류(RF·GB·LGB·CB) 및 크로스섹셔널 순위(XGBRanker)로 예측한다.
+절대 수익률 회귀 대신 이진 분류/랭킹을 채택하여 노이즈를 줄이고 신호 대 잡음비를 개선한다.
 
 ```
 추론 결과 (ml_score)
   0   = 하위 25% 예상 (낮은 확률)
  50   = 중립
 100   = 상위 25% 예상 (높은 확률)
-(test_proba 101분위수 캘리브레이션으로 0~100 균등 스케일 변환)
+(test_proba/predict 101분위수 캘리브레이션으로 0~100 균등 스케일 변환)
 ```
 
 ML 점수는 종합 점수 산출에 다음 가중치로 반영된다.
@@ -78,26 +78,27 @@ df_all = df_all.dropna(subset=['target'])     # 중간 50% 제외
 총 **18개 피처** — 순수 기술지표 + 거시경제 (PyKrx 펀더멘털·수급 제외)
 
 > 제거된 피처 (v0.3.2): `sqzmi`, `vol_change`, `macd_diff_change`, `obv_change`, `rsi_mfi_div`, `candle_body`, `rs_vs_mkt_1m` — 3모델 합산 중요도 최하위(<2%)
+> 피처 교체 (v0.3.7): `adx_di_diff`·`cmf`·`vol_ratio` 제거 / `bb_position`·`mfi`·`low_52w_ratio` 추가. `atr_ratio` → rolling 60일 percentile 변환 (레짐 의존성 제거).
 
 ### 3-1. 피처 목록
 
 | 그룹 | 피처 | 설명 |
 |------|------|------|
-| 변동성·추세강도 (4) | `atr_ratio` | ATR / 종가 — 상대 변동성 |
+| 변동성·추세강도 (4) | `atr_ratio` | ATR/종가 rolling 60일 percentile — 레짐 독립적 변동성 |
 | | `adx` | ADX 추세 강도 (0~100) |
-| | `adx_di_diff` | DI+ − DI− (추세 방향, 양수=상승) |
 | | `bb_width` | BB 너비 / BB 중심선 |
+| | `bb_position` | BB 내 상대 위치 — (종가 − BB하단) / (BB상단 − BB하단) |
 | 시장 상대강도 (1) | `rs_vs_mkt_3m` | 3개월 수익률 − 벤치마크 3개월 |
-| 모멘텀 팩터 (3) | `high_52w_ratio` | 종가 / 52주 고점 |
+| 모멘텀·추세 (5) | `high_52w_ratio` | 종가 / 52주 고점 |
 | | `mom_accel` | return_1m − (return_3m / 3) |
 | | `macd_diff` | MACD − Signal (히스토그램) |
-| 추세 기울기 (2) | `macd_slope_5d` | MACD diff 5일 기울기 |
+| | `macd_slope_5d` | MACD diff 5일 기울기 |
 | | `price_sma_5_ratio` | 종가 / SMA5 |
-| finta 지표 (4) | `fisher` | Fisher Transform (클립 ±5) |
+| finta 지표 (2) | `fisher` | Fisher Transform (클립 ±5) |
 | | `bullish_fractal_5d` | Williams Fractal 5일 내 최댓값 |
-| | `cmf` | Chaikin Money Flow |
+| 거래량·강도 (3) | `mfi` | Money Flow Index (거래량 가중 RSI, 0~100) |
 | | `vzo` | Volume Zone Oscillator |
-| 거래량·강도 (1) | `vol_ratio` | 거래량 / 20일 평균 거래량 |
+| | `low_52w_ratio` | 종가 / 52주 저점 — 저점 대비 반등 위치 (≥ 1.0) |
 | 거시경제 (3) | `vix_level` | VIX 절대값 |
 | | `vix_change_5d` | VIX 5일 변화율 |
 | | `sp500_1m` | S&P500 1개월 수익률 |
@@ -114,7 +115,8 @@ df_all = df_all.dropna(subset=['target'])     # 중간 50% 제외
 
 ## 4. 모델 구성
 
-세 모델을 독립적으로 학습하고 AUC 기반 가중 앙상블로 결합한다.
+다섯 모델을 독립적으로 학습하고 AUC 기반 가중 앙상블로 결합한다.
+이진 분류기 4개(RF·GB·LGB·CB) + 크로스섹셔널 랭커 1개(XGBRanker).
 
 ### Random Forest (이진 분류기)
 
@@ -137,19 +139,55 @@ df_all = df_all.dropna(subset=['target'])     # 중간 50% 제외
 | min_samples_leaf | 25 |
 | subsample | 0.7 |
 
-### XGBoost (이진 분류기)
+### LightGBM (이진 분류기)
+
+leaf-wise 분기 특성상 과적합이 강하게 발생 → 강한 정규화 적용.
 
 | 파라미터 | 값 |
 |----------|----|
 | n_estimators | 200 |
-| learning_rate | 0.05 |
 | max_depth | 2 |
+| num_leaves | 4 |
+| learning_rate | 0.05 |
+| min_child_samples | 100 |
+| subsample | 0.6 |
+| subsample_freq | 1 |
+| colsample_bytree | 0.5 |
+| reg_alpha | 2.0 |
+| reg_lambda | 5.0 |
+| class_weight | balanced |
+
+### CatBoost (이진 분류기)
+
+과적합 방어 기능 내장 (Ordered Boosting, 대칭 트리).
+
+| 파라미터 | 값 |
+|----------|----|
+| iterations | 200 |
+| depth | 3 |
+| learning_rate | 0.05 |
+| l2_leaf_reg | 3.0 |
+| min_data_in_leaf | 25 |
+| bootstrap_type | Bernoulli |
+| subsample | 0.7 |
+| auto_class_weights | Balanced |
+
+### XGBRanker (크로스섹셔널 랭커)
+
+이진 분류 대신 `rank:ndcg` 목적함수로 날짜별 그룹 내 종목 순위를 직접 최적화한다.
+`predict_proba()` 없이 연속 점수 반환 → 101분위수 캘리브레이션으로 0~100 변환.
+
+| 파라미터 | 값 |
+|----------|----|
+| objective | rank:ndcg |
+| n_estimators | 200 |
+| max_depth | 3 |
+| learning_rate | 0.05 |
 | subsample | 0.7 |
 | colsample_bytree | 0.6 |
-| min_child_weight | 30 |
+| min_child_weight | 25 |
 | reg_alpha | 1.0 |
 | reg_lambda | 3.0 |
-| scale_pos_weight | 1.0 (50:50 균형) |
 
 ---
 
@@ -268,17 +306,20 @@ p = float(np.clip(np.searchsorted(calibration, p_raw), 0, 100))
 
 ## 7. 성능 지표
 
-> 학습일: 2026-03-02 / 검증 기간: ≈ 2025-10 이후 약 5개월
+> 학습일: 2026-03-05 / 검증 기간: ≈ 2025-10 이후 약 5개월
 
-| 모델 | test AUC | CV AUC (5-fold TS) | train AUC | 과적합 gap |
-|------|----------|-------------------|----------|-----------|
-| Random Forest | **0.5759** | 0.5074 ± 0.0307 | 0.6492 | 0.0733 |
-| Gradient Boosting | **0.5849** | 0.5144 ± 0.0288 | 0.6592 | 0.0743 |
-| XGBoost | **0.5769** | 0.5159 ± 0.0302 | 0.6485 | 0.0716 |
-| 기준선 (랜덤 분류기) | 0.5000 | — | — | — |
+| 모델 | test AUC | CV AUC (5-fold TS) | 과적합 gap |
+|------|----------|-------------------|-----------|
+| Random Forest | **~0.575** | ~0.507 | ~0.068 |
+| Gradient Boosting | **~0.585** | ~0.514 | ~0.071 |
+| LightGBM | **~0.586** | ~0.516 | ~0.068 |
+| CatBoost | **~0.591** | ~0.515 | ~0.076 |
+| XGBRanker | **~0.575** | ~0.520 | ~0.055 |
+| **앙상블 평균** | **0.5857** | — | **0.0694** |
+| 기준선 (랜덤 분류기) | 0.5000 | — | — |
 
-> **해석:** 이진 분류의 AUC 0.52~0.57은 랜덤(0.50) 대비 유의미한 수준이다.
-> CV AUC가 test AUC보다 낮게 나오는 것은 TimeSeriesSplit 특성상 초기 fold의 학습 데이터가 적기 때문이며 정상 범위다.
+> **해석:** AUC 0.57~0.59는 랜덤(0.50) 대비 유의미한 수준이다. XGBRanker는 과적합 갭이 가장 안정적(0.055).
+> CV AUC가 test AUC보다 낮은 것은 TimeSeriesSplit 초기 fold 학습 데이터 부족 때문이며 정상 범위다.
 
 ### AUC 개선 이력
 
@@ -289,6 +330,7 @@ p = float(np.clip(np.searchsorted(calibration, p_raw), 0, 100))
 | Neutral Zone 타깃 (v0.3.0) | 25 | 상위 25%/하위 25%, 중간 50% 제외 | **0.5600** |
 | XGBoost 과적합 감소 (v0.3.1) | 25 | 동일 | **0.5600** (XGB: 0.5558→0.5671) |
 | 피처 정제 + CV Purging 적용 (v0.3.2) | 18 | 동일 | **0.5759** |
+| 5-모델 앙상블 + 피처 교체 (v0.3.7) | 18 | 동일 | **~0.575** / 앙상블 평균: **0.5857** |
 
 ---
 

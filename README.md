@@ -1,6 +1,6 @@
 # 📈 Korean Stocks AI/ML Analysis System
 
-![version](https://img.shields.io/badge/version-0.3.6-blue)
+![version](https://img.shields.io/badge/version-0.3.7-blue)
 
 > **KOSPI · KOSDAQ 종목을 AI와 머신러닝으로 분석하는 자동화 투자 보조 플랫폼**
 
@@ -56,7 +56,7 @@
 UI          FastAPI + Reveal.js (일일 브리핑) + Vanilla JS (인터랙티브 대시보드)
 CLI         Typer (koreanstocks serve / recommend / analyze / train / init / sync / home / outcomes)
 AI/LLM      OpenAI GPT-4o-mini
-ML          Scikit-learn (Random Forest, Gradient Boosting), XGBoost
+ML          Scikit-learn (Random Forest, Gradient Boosting), XGBoost Ranker, LightGBM, CatBoost
 기술 지표    ta (RSI, MACD, BB, SMA, OBV, ADX, VWAP, CMF, MFI, Stochastic, CCI, ATR, Donchian)
              + finta (SQZMI, VZO, Fisher Transform, Williams Fractal)
 데이터       FinanceDataReader, Naver News API, DART Open API (선택)
@@ -126,7 +126,7 @@ KoreanStocks/
 ├── requirements.txt                     # 개발/테스트 전용 (pytest 등)
 ├── src/
 │   └── koreanstocks/
-│       ├── __init__.py                  # VERSION = "0.3.6"
+│       ├── __init__.py                  # VERSION = "0.3.7"
 │       ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init/sync/home/outcomes)
 │       ├── api/
 │       │   ├── app.py                   # FastAPI 앱 팩토리, StaticFiles 마운트
@@ -154,7 +154,7 @@ KoreanStocks/
 │           ├── engine/
 │           │   ├── indicators.py        # 기술적 지표 계산 (RSI, MACD, BB, SMA, OBV)
 │           │   ├── strategy.py          # 전략별 시그널 생성 (TechnicalStrategy)
-│           │   ├── prediction_model.py  # ML 앙상블 예측 (RF + GB + XGB 이진 분류)
+│           │   ├── prediction_model.py  # ML 앙상블 예측 (RF · GB · LGB · CB · XGBRanker 앙상블)
 │           │   ├── news_agent.py        # 뉴스 수집 + 감성 분석 (GPT-4o-mini)
 │           │   ├── analysis_agent.py    # 종목 심층 분석 오케스트레이터
 │           │   ├── recommendation_agent.py  # 버킷 기반 종목 선정 + 추천 생성
@@ -221,17 +221,16 @@ flowchart TD
 #### 2단계 — ML 앙상블 (ml_score, 0–100)
 
 ```
-모델: Random Forest + Gradient Boosting + XGBoost (AUC 기반 가중 앙상블)
+모델: RF · GB · LGB · CB (AUC 기반 가중 앙상블, 이진 분류) + XGBRanker (rank:ndcg, 크로스섹셔널 직접 최적화)
 피처: 18개 (순수 기술지표 + 거시경제, pykrx 의존성 없음)
-  · 변동성·추세강도 (4): ATR 비율, ADX, ADX DI방향(DI+−DI−), BB 너비
-  · 시장 상대강도 (1): 3개월 초과수익 (vs KS11/KQ11)
-  · 모멘텀 팩터 (3): 52주 고점 비율, 모멘텀 가속도, MACD diff
-  · 추세 기울기 (2): MACD diff 5일 기울기, 가격/SMA5 비율
-  · finta 지표 (4): Fisher Transform, Williams Fractal, CMF, VZO
-  · 거래량·강도 (1): 거래량 비율 (20일 평균 대비)
+  · 변동성·추세강도 (4): ATR 비율(rolling 60일 percentile), ADX, BB 너비, BB 위치
+  · 시장 상대강도 (1): 3개월 시장 초과수익 (vs KS11/KQ11)
+  · 모멘텀·추세 (5): 52주 고점 비율, 모멘텀 가속도, MACD diff, MACD diff 5일 기울기, 가격/SMA5 비율
+  · finta 지표 (2): Fisher Transform, Williams Fractal (5일)
+  · 거래량·강도 (3): MFI, VZO, 52주 저가 대비 반등 위치
   · 거시경제 (3): VIX 레벨, VIX 5일 변화율, S&P500 1개월 수익률
 타깃: 10거래일 후 수익률 상위 25% = 1 / 하위 25% = 0 (중간 50% 제외, neutral zone)
-출력: 이진 분류 확률 → test_proba 101분위수 캘리브레이션 → 0~100 균등 스케일
+출력: 이진 분류 확률(RF·GB·LGB·CB) + Ranker 점수(XGBRanker) → 101분위수 캘리브레이션 → 0~100 균등 스케일
 폴백: 모델 없을 경우 tech_score로 대체
 ```
 
@@ -765,6 +764,15 @@ flowchart TD
 ---
 
 ## 📝 변경 이력
+
+### v0.3.7 (2026-03-05) — 5-모델 앙상블 + 피처 개선
+
+- ✨ LightGBM, CatBoost 모델 추가 — 5-모델 앙상블 (RF · GB · LGB · CB · XGBRanker)
+- ✨ XGBoost 이진 분류 → XGBRanker (rank:ndcg) 교체 — 크로스섹셔널 순위 직접 최적화
+- 🔧 atr_ratio → rolling 60일 percentile 변환 — 시장 레짐 의존성 제거
+- 🔧 피처 교체: adx_di_diff·cmf·vol_ratio → bb_position·mfi·low_52w_ratio (정보력 향상)
+- 🔧 LightGBM 강한 정규화: max_depth=2, num_leaves=4, min_child_samples=100 (과적합 갭 0.137→0.068)
+- 🎨 모델 신뢰도 탭: 5개 모델 표시, test_logloss null 안전 처리, XGBRanker 캘리브레이션
 
 ### v0.3.6 (2026-03-04)
 

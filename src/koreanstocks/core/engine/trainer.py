@@ -20,6 +20,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score, log_loss
 import joblib
 import xgboost as xgb
+import lightgbm as lgb
+from catboost import CatBoostClassifier
 
 from koreanstocks.core.config import config
 from koreanstocks.core.data.provider import data_provider
@@ -255,14 +257,33 @@ MODEL_CONFIGS: Dict[str, dict] = {
             min_samples_leaf=25, subsample=0.7, random_state=42,
         ),
     },
-    'xgboost': {
-        'class': xgb.XGBClassifier,
+    'lightgbm': {
+        'class': lgb.LGBMClassifier,
         'params': dict(
             n_estimators=200, max_depth=2, learning_rate=0.05,
-            subsample=0.7, colsample_bytree=0.6, min_child_weight=30,
+            num_leaves=4, min_child_samples=100,
+            subsample=0.6, subsample_freq=1, colsample_bytree=0.5,
+            reg_alpha=2.0, reg_lambda=5.0,
+            class_weight='balanced', random_state=42, verbose=-1,
+        ),
+    },
+    'catboost': {
+        'class': CatBoostClassifier,
+        'params': dict(
+            iterations=200, depth=3, learning_rate=0.05,
+            l2_leaf_reg=3.0, min_data_in_leaf=25,
+            bootstrap_type='Bernoulli', subsample=0.7,
+            auto_class_weights='Balanced',
+            random_seed=42, verbose=0,
+        ),
+    },
+    'xgboost_ranker': {
+        'class': xgb.XGBRanker,
+        'is_ranker': True,
+        'params': dict(
+            n_estimators=200, max_depth=3, learning_rate=0.05,
+            subsample=0.7, colsample_bytree=0.6, min_child_weight=25,
             reg_alpha=1.0, reg_lambda=3.0,
-            scale_pos_weight=1.0,   # 중립 구간 제거로 클래스 균형 (50:50)
-            use_label_encoder=False, eval_metric='logloss',
             random_state=42, verbosity=0,
         ),
     },
@@ -270,12 +291,12 @@ MODEL_CONFIGS: Dict[str, dict] = {
 
 BASE_FEATURE_COLS = [
     # ── 변동성 / 추세 강도 ────────────────────────────────────
-    'atr_ratio',            # 변동성 (ATR/가격) — importance 1위
+    'atr_ratio',            # rolling 60일 percentile (레짐 독립)
     'adx',                  # 추세 강도 (방향 무관)
-    'adx_di_diff',          # DI+ - DI- (추세 방향성 — ADX 보완)
     'bb_width',             # 볼린저 밴드 폭 (변동성 압축 감지)
+    'bb_position',          # BB 내 가격 위치 (0=하단, 1=상단)
     # ── 중기 모멘텀 / 상대강도 ────────────────────────────────
-    'rs_vs_mkt_3m',         # KOSPI 대비 3개월 초과수익 (rs_vs_mkt_1m 포함)
+    'rs_vs_mkt_3m',         # KOSPI 대비 3개월 초과수익
     'high_52w_ratio',       # 52주 고가 대비 현재가 (추세 위치)
     'mom_accel',            # 모멘텀 가속도 (1m - 3m/3)
     # ── 추세 / 가격 모멘텀 ────────────────────────────────────
@@ -286,14 +307,14 @@ BASE_FEATURE_COLS = [
     'fisher',               # Fisher Transform (극값=반전)
     'bullish_fractal_5d',   # Williams 강세 프랙탈 5일
     # ── 거래량 방향성 ─────────────────────────────────────────
-    'cmf',                  # Chaikin Money Flow (매수/매도 압력)
+    'mfi',                  # Money Flow Index (가격+거래량 통합)
     'vzo',                  # Volume Zone Oscillator
-    'vol_ratio',            # 거래량 / 20일 평균 비율
+    'low_52w_ratio',        # 52주 저가 대비 현재가 (반등 위치)
     # ── 거시경제 ──────────────────────────────────────────────
     'vix_level',            # VIX 공포지수
     'vix_change_5d',        # VIX 5일 변화율
     'sp500_1m',             # S&P500 1개월 수익률
-]  # 18개 피처 (제거: sqzmi, vol_change, macd_diff_change, obv_change, rsi_mfi_div, candle_body, rs_vs_mkt_1m)
+]  # 18개 피처 (제거: rs_vs_mkt_1m(0.75%)/vol_zscore(0.54%) → 추가: bb_position/mfi)
 
 FEATURE_COLS = BASE_FEATURE_COLS
 
@@ -321,10 +342,20 @@ def build_features(df_ind: pd.DataFrame,
     feat['bb_width']    = bb_range / df_ind['bb_mid']
     feat['vol_ratio']   = df_ind['volume'] / df_ind['vol_sma_20'].replace(0, np.nan)
 
+    # vol_zscore: 거래량 표준화 (-3~+3)
+    vol_ma  = df_ind['volume'].rolling(20).mean()
+    vol_std = df_ind['volume'].rolling(20).std().replace(0, np.nan)
+    feat['vol_zscore'] = ((df_ind['volume'] - vol_ma) / vol_std).clip(-3, 3)
+
+    # low_52w_ratio: 52주 저가 대비 반등 위치 (≥ 1.0)
+    feat['low_52w_ratio'] = (
+        df_ind['close'] / df_ind['close'].rolling(252, min_periods=60).min()
+    )
+
     feat['stoch_k']   = df_ind['stoch_k']
     feat['stoch_d']   = df_ind['stoch_d']
     feat['cci']       = df_ind['cci']
-    feat['atr_ratio'] = df_ind['atr'] / df_ind['close']
+    feat['atr_ratio'] = (df_ind['atr'] / df_ind['close']).rolling(60).rank(pct=True)
     feat['candle_body'] = (df_ind['close'] - df_ind['open']) / df_ind['open']
     feat['obv_change']  = df_ind['obv'].pct_change().clip(-1, 1)
 
@@ -594,16 +625,15 @@ def train_and_save(df_train: pd.DataFrame, df_test: pd.DataFrame,
         logger.info(f"  학습 중: {name}")
         t0 = time.time()
 
-        # ── H: 5-fold TimeSeriesSplit 교차검증 (Purging 적용) ────────────────
-        # Purging: val fold 시작 전 future_days 거래일을 학습 fold에서 제거.
-        # 그 기간 샘플의 타깃이 val 기간 가격으로 계산되므로 label leakage 발생.
+        is_ranker = cfg.get('is_ranker', False)
+
+        # ── 5-fold TimeSeriesSplit 교차검증 (Purging 적용) ────────────────
         tscv    = TimeSeriesSplit(n_splits=5)
         cv_aucs = []
         for tr_d_idx, val_d_idx in tscv.split(unique_dates):
             tr_dates  = [unique_dates[i] for i in tr_d_idx]
             val_dates = [unique_dates[i] for i in val_d_idx]
 
-            # val 시작 위치보다 future_days 앞까지만 학습에 포함 (purge boundary)
             val_start_pos   = date_to_pos[val_dates[0]]
             purge_boundary  = val_start_pos - future_days
             purged_tr_dates = {d for d in tr_dates if date_to_pos[d] < purge_boundary}
@@ -612,33 +642,56 @@ def train_and_save(df_train: pd.DataFrame, df_test: pd.DataFrame,
             val_mask = df_train.index.isin(set(val_dates))
             if tr_mask.sum() < 10 or val_mask.sum() < 10:
                 continue
-            cv_sc = StandardScaler()
-            cv_m  = cfg['class'](**cfg['params'])
-            cv_m.fit(cv_sc.fit_transform(X_train[tr_mask]), y_train[tr_mask])
-            cv_p  = cv_m.predict_proba(cv_sc.transform(X_train[val_mask]))[:, 1]
-            cv_aucs.append(roc_auc_score(y_train[val_mask], cv_p))
+            if is_ranker:
+                fold_tr  = df_train[tr_mask].sort_index()
+                fold_val = df_train[val_mask].sort_index()
+                cv_sc    = StandardScaler()
+                cv_m     = cfg['class'](**cfg['params'])
+                X_cv_tr  = cv_sc.fit_transform(fold_tr[feat_names].values)
+                X_cv_val = cv_sc.transform(fold_val[feat_names].values)
+                g_cv_tr  = fold_tr.groupby(fold_tr.index).size().values
+                cv_m.fit(X_cv_tr, fold_tr['target'].values, group=g_cv_tr)
+                cv_scores = cv_m.predict(X_cv_val)
+                cv_aucs.append(roc_auc_score(fold_val['target'].values, cv_scores))
+            else:
+                cv_sc = StandardScaler()
+                cv_m  = cfg['class'](**cfg['params'])
+                cv_m.fit(cv_sc.fit_transform(X_train[tr_mask]), y_train[tr_mask])
+                cv_p  = cv_m.predict_proba(cv_sc.transform(X_train[val_mask]))[:, 1]
+                cv_aucs.append(roc_auc_score(y_train[val_mask], cv_p))
         cv_mean = float(np.mean(cv_aucs)) if cv_aucs else float('nan')
         cv_std  = float(np.std(cv_aucs))  if cv_aucs else float('nan')
         logger.info(f"  CV AUC (5-fold TS, purged): {cv_mean:.4f} ± {cv_std:.4f}")
 
         # ── 최종 모델 학습 (전체 학습 세트 사용) ─────────────────────────────
         scaler = StandardScaler()
-        X_tr   = scaler.fit_transform(X_train)
-        X_te   = scaler.transform(X_test)
-
-        model = cfg['class'](**cfg['params'])
-        model.fit(X_tr, y_train)
-        duration = time.time() - t0
-
-        # AUC-ROC 평가
-        train_proba = model.predict_proba(X_tr)[:, 1]
-        test_proba  = model.predict_proba(X_te)[:, 1]
-        # 캘리브레이션: 테스트 확률의 101분위수 저장 → predict 시 0~100 균등 스케일로 변환
-        # train_proba 기준이면 과적합 분포(0.13~0.87)가 되어 실제 예측 범위를 반영 못 함
-        calibration_points = np.percentile(test_proba, np.arange(0, 101)).tolist()
-        train_auc   = roc_auc_score(y_train, train_proba)
-        test_auc    = roc_auc_score(y_test,  test_proba)
-        test_logloss = log_loss(y_test, test_proba)
+        if is_ranker:
+            df_tr_sorted = df_train.sort_index()
+            g_tr  = df_tr_sorted.groupby(df_tr_sorted.index).size().values
+            X_tr  = scaler.fit_transform(df_tr_sorted[feat_names].values)
+            X_te  = scaler.transform(X_test)
+            model = cfg['class'](**cfg['params'])
+            model.fit(X_tr, df_tr_sorted['target'].values, group=g_tr)
+            duration = time.time() - t0
+            train_scores = model.predict(X_tr)
+            test_scores  = model.predict(X_te)
+            calibration_points = np.percentile(test_scores, np.arange(0, 101)).tolist()
+            train_auc    = roc_auc_score(df_tr_sorted['target'].values, train_scores)
+            test_auc     = roc_auc_score(y_test, test_scores)
+            test_logloss = float('nan')
+        else:
+            X_tr  = scaler.fit_transform(X_train)
+            X_te  = scaler.transform(X_test)
+            model = cfg['class'](**cfg['params'])
+            model.fit(X_tr, y_train)
+            duration = time.time() - t0
+            train_proba  = model.predict_proba(X_tr)[:, 1]
+            test_proba   = model.predict_proba(X_te)[:, 1]
+            # 캘리브레이션: 테스트 확률의 101분위수 저장 → predict 시 0~100 균등 스케일로 변환
+            calibration_points = np.percentile(test_proba, np.arange(0, 101)).tolist()
+            train_auc    = roc_auc_score(y_train, train_proba)
+            test_auc     = roc_auc_score(y_test,  test_proba)
+            test_logloss = log_loss(y_test, test_proba)
         overfit_gap  = round(train_auc - test_auc, 4)
 
         logger.info(f"  AUC : {test_auc:.4f}  (학습 AUC: {train_auc:.4f}  과적합 gap: {overfit_gap:.4f})")
@@ -678,7 +731,7 @@ def train_and_save(df_train: pd.DataFrame, df_test: pd.DataFrame,
             "parameters": {k: v for k, v in cfg['params'].items()
                            if k not in ('random_state', 'n_jobs', 'verbosity',
                                         'use_label_encoder', 'eval_metric')},
-            "model_type":          "binary_classifier",
+            "model_type":          "ranker" if is_ranker else "binary_classifier",
             "target_definition":   (
                 f"top {int((1-TOP_K_PERCENTILE)*100)}% / "
                 f"bottom {int(BOTTOM_K_PERCENTILE*100)}% return in {10}d (neutral zone)"
@@ -690,7 +743,7 @@ def train_and_save(df_train: pd.DataFrame, df_test: pd.DataFrame,
             "purging_days":        future_days,
             "train_auc":           round(train_auc,   4),
             "test_auc":            round(test_auc,    4),
-            "test_logloss":        round(test_logloss, 4),
+            "test_logloss":        round(test_logloss, 4) if not np.isnan(test_logloss) else None,
             "overfit_gap":         overfit_gap,
             "quality_pass":        quality_pass,
             "training_duration":   round(duration, 1),

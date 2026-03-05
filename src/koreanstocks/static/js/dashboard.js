@@ -1360,8 +1360,8 @@ function renderEnsembleSummary(ens) {
     <div class="result-grid">
       <div class="result-card">
         <div class="rc-label">활성 모델 수</div>
-        <div class="rc-val">${ens.active_count} / 3</div>
-        <div class="rc-delta" style="color:var(--muted)">RF + GB + XGB</div>
+        <div class="rc-val">${ens.active_count} / 5</div>
+        <div class="rc-delta" style="color:var(--muted)">RF · GB · LGB · CB · XGBRanker</div>
       </div>
       <div class="result-card">
         <div class="rc-label">평균 Test AUC</div>
@@ -1447,7 +1447,7 @@ function renderModelCards(models) {
       </div>
       <div class="kv-row" style="font-size:.82em">
         <span class="kv-key">Log Loss</span>
-        <span class="kv-val">${m.test_logloss.toFixed(4)}</span>
+        <span class="kv-val">${m.test_logloss != null ? m.test_logloss.toFixed(4) : "N/A (ranker)"}</span>
       </div>
       <div class="kv-row" style="font-size:.82em">
         <span class="kv-key">학습 샘플</span>
@@ -1558,7 +1558,7 @@ function renderComponentReliability(ens, formula) {
     </div>
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:16px">
       <div style="font-weight:700;margin-bottom:8px">🤖 ML 예측</div>
-      <div class="kv-row" style="font-size:.82em"><span class="kv-key">방식</span><span class="kv-val">RF + GB + XGB 앙상블 (이진 분류)</span></div>
+      <div class="kv-row" style="font-size:.82em"><span class="kv-key">방식</span><span class="kv-val">RF · GB · LGB · CB · XGBRanker 앙상블</span></div>
       <div class="kv-row" style="font-size:.82em"><span class="kv-key">AUC</span>
         <span class="kv-val" style="color:${aucColor(aucVal)}">${aucVal.toFixed(4)}</span>
       </div>

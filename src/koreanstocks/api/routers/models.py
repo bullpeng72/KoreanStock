@@ -15,9 +15,11 @@ router = APIRouter(tags=["models"])
 PARAMS_DIR = Path(config.BASE_DIR) / "models" / "saved" / "model_params"
 
 _MODEL_CONFIGS = [
-    ("random_forest",       "랜덤 포레스트",      "random_forest_params.json"),
-    ("gradient_boosting",   "그래디언트 부스팅",   "gradient_boosting_params.json"),
-    ("xgboost",             "XGBoost",            "xgboost_params.json"),
+    ("random_forest",     "랜덤 포레스트",      "random_forest_params.json"),
+    ("gradient_boosting", "그래디언트 부스팅",   "gradient_boosting_params.json"),
+    ("lightgbm",          "LightGBM",           "lightgbm_params.json"),
+    ("catboost",          "CatBoost",           "catboost_params.json"),
+    ("xgboost_ranker",    "XGBoost Ranker",     "xgboost_ranker_params.json"),
 ]
 
 _MIN_AUC_THRESHOLD = 0.52
@@ -51,17 +53,22 @@ def _load_model_info(name: str, label: str, filename: str) -> dict | None:
     test_auc  = p.get("test_auc", 0.0)
     cv_mean   = p.get("cv_auc_mean", 0.0)
     saved_at  = p.get("saved_at", "")
+    model_type = p.get("model_type", "binary_classifier")
+    # ranker는 test_logloss=None으로 저장됨 (log_loss 미정의)
+    raw_logloss = p.get("test_logloss")
+    test_logloss = float(raw_logloss) if raw_logloss is not None else None
 
     return {
         "name":               name,
         "label":              label,
+        "model_type":         model_type,
         "test_auc":           test_auc,
         "train_auc":          p.get("train_auc", 0.0),
         "cv_auc_mean":        cv_mean,
         "cv_auc_std":         p.get("cv_auc_std", 0.0),
         "overfit_gap":        p.get("overfit_gap", 0.0),
         "regime_gap":         round(test_auc - cv_mean, 4),
-        "test_logloss":       p.get("test_logloss", 0.0),
+        "test_logloss":       test_logloss,
         "quality_pass":       p.get("quality_pass", False),
         "training_samples":   p.get("training_samples", 0),
         "purging_days":       p.get("purging_days", 0),
