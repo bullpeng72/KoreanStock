@@ -1,6 +1,6 @@
 # ML 분석 시스템 기술 문서
 
-> Korean Stocks AI/ML Analysis System `v0.3.7`
+> Korean Stocks AI/ML Analysis System `v0.3.8`
 > 최종 업데이트: 2026-03-05
 
 ---
@@ -252,11 +252,11 @@ tr_mask = tr_mask & (df_train.index < purge_cutoff)
 - 전체 분할 경계(`split_date`) 직전 10거래일을 학습 세트에서 제거
 - 이로 인해 약 720개 샘플이 제거됨 (2025-10 경계 구간)
 
-### 학습 데이터 현황 (v0.3.2 기준)
+### 학습 데이터 현황 (v0.3.7 기준)
 
 | 항목 | 값 |
 |------|----|
-| 학습 종목 | 146개 (KOSPI200+KOSDAQ150 폴백, DEFAULT_TRAINING_STOCKS) |
+| 학습 종목 | 146개 (`DEFAULT_TRAINING_STOCKS` 고정 리스트 — KOSPI 84개 + KOSDAQ 62개) |
 | 데이터 기간 | 2년 (`--period 2y`) |
 | 학습 샘플 (neutral zone 제외) | 21,276 |
 | 검증 샘플 | 5,499 |
@@ -367,5 +367,5 @@ koreanstocks train --future-days 10 --period 2y --test-ratio 0.2
 |------|------|
 | CV AUC vs test AUC 간격 | TimeSeriesSplit 초기 fold는 학습 데이터 부족 → CV AUC가 낮게 측정됨. 정상 현상. |
 | 단기 노이즈 | 10거래일 예측은 본질적으로 신호 대 잡음비가 낮음 (AUC 0.57이 현실적 상한) |
-| 상장 폐지 종목 | 학습 종목 리스트에서 수동으로 제거 필요 |
+| 상장 폐지 종목 | 학습 종목 리스트(`DEFAULT_TRAINING_STOCKS`)에서 수동으로 제거 필요 |
 | 거시 데이터 의존 | VIX·S&P500 오프라인/API 오류 시 기본값(20.0, 0.0)으로 폴백 |

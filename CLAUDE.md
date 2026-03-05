@@ -1,4 +1,4 @@
-# Korean Stocks AI/ML Analysis System `v0.3.7`
+# Korean Stocks AI/ML Analysis System `v0.3.8`
 
 KOSPI·KOSDAQ 종목을 기술적 지표, 머신러닝, 뉴스 감성 분석으로 자동 스크리닝하고 텔레그램 리포트를 발송하는 투자 보조 플랫폼.
 
@@ -187,6 +187,17 @@ DB_PATH=data/storage/stock_analysis.db
 - GitHub Actions 스케줄 변경
 
 ## 📝 변경 이력
+
+### v0.3.8 (2026-03-05) — 기술 부채 해소 + 버전 단일 소스 구조
+
+- ✨ `/api/version` 엔드포인트 신설 — 대시보드가 API로 버전 동적 조회
+- 🔧 버전 단일 소스 (`__init__.py`) → `app.py`·`config.py`에서 직접 임포트
+- 🐛 `prediction_model.py` `mom_accel` 공식 수정 — 학습/추론 불일치 해소
+- 🔧 `prediction_model.py` 미사용 레거시 임포트 제거 (Regressor, LinearRegression 등)
+- 🐛 `analysis_agent.py` GPT 프롬프트 "5거래일" → "10거래일" 정정
+- 🔧 `market.py` `os.getenv` → `config.*` 전환, 하드코딩 모델명 제거
+- 🔧 `provider.py` `import requests` 모듈 최상단 이동
+- 📝 `docs/` 3건 현행화 및 `mom_accel` 한계 항목 제거
 
 ### v0.3.7 (2026-03-05) — 5-모델 앙상블 + 피처 개선
 

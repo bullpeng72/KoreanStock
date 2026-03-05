@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import requests
 import FinanceDataReader as fdr
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as _FuturesTimeout
 from datetime import datetime, timedelta, date as date_type

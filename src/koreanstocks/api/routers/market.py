@@ -1,12 +1,12 @@
 """시장 현황 라우터 — GET /api/market"""
 import logging
 import math
-import os
 import time
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as _FuturesTimeout
 from fastapi import APIRouter, Depends
 from koreanstocks.api.dependencies import get_data_provider
+from koreanstocks.core.config import config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["market"])
@@ -118,8 +118,8 @@ def _chk_fdr_index():
 
 def _chk_naver_news():
     import requests
-    cid = os.getenv('NAVER_CLIENT_ID', '')
-    sec = os.getenv('NAVER_CLIENT_SECRET', '')
+    cid = config.NAVER_CLIENT_ID or ''
+    sec = config.NAVER_CLIENT_SECRET or ''
     if not cid or not sec:
         return {"status": "warn", "detail": "API 키 미설정 (NAVER_CLIENT_ID / NAVER_CLIENT_SECRET)"}
     headers = {"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": sec}
@@ -135,12 +135,12 @@ def _chk_naver_news():
 
 def _chk_openai():
     import openai
-    api_key = os.getenv('OPENAI_API_KEY', '')
+    api_key = config.OPENAI_API_KEY or ''
     if not api_key:
         return {"status": "error", "detail": "API 키 미설정 (OPENAI_API_KEY)"}
     client = openai.OpenAI(api_key=api_key)
     resp = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=config.DEFAULT_MODEL,
         messages=[{"role": "user", "content": "ping"}],
         max_tokens=1,
     )
@@ -149,7 +149,7 @@ def _chk_openai():
 
 
 def _chk_dart():
-    dart_key = os.getenv('DART_API_KEY', '')
+    dart_key = config.DART_API_KEY or ''
     if not dart_key:
         return {"status": "warn", "detail": "미설정 (선택 항목 — 공시 수집 비활성)"}
     import requests

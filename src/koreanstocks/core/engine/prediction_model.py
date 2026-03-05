@@ -1,18 +1,15 @@
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 import joblib
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import json
 
 from koreanstocks.core.config import config
 from koreanstocks.core.engine.indicators import indicators
-from koreanstocks.core.data.database import db_manager
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +252,7 @@ class StockPredictionModel:
         feat['return_1m']         = df['close'].pct_change(20)
         feat['return_3m']         = df['close'].pct_change(60)
         feat['high_52w_ratio']    = df['close'] / df['close'].rolling(config.TRADING_DAYS_PER_YEAR, min_periods=60).max()
-        feat['mom_accel']         = (feat['return_1m'] - feat['return_3m']) / 3.0
+        feat['mom_accel']         = feat['return_1m'] - feat['return_3m'] / 3.0
 
         # ── 시장 상대강도 ─────────────────────────────
         if market_df is not None and not market_df.empty:

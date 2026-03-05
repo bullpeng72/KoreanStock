@@ -235,7 +235,7 @@ def _get_dynamic_training_stocks() -> List[str]:
 
 # ─────────────────────────────────────────────────────────────────────────
 # 이진 분류 설정
-# 타깃: 10거래일 후 수익률이 상위 30%이면 1 (매수 신호), 나머지 0
+# 타깃: 10거래일 후 수익률 상위 25% = 1, 하위 25% = 0, 중간 50% 제외 (neutral zone)
 # 지표: AUC-ROC (랜덤 = 0.5, 목표 ≥ 0.55)
 # ─────────────────────────────────────────────────────────────────────────
 TOP_K_PERCENTILE    = 0.75   # 상위 25% = 1 (rank pct ≥ 0.75)
@@ -785,7 +785,7 @@ def run_training(
     Args:
         period:      학습 데이터 기간 (예: '2y', '1y')
         future_days: 예측 대상 거래일 수 (기본값 10 = 2주, 중기 노이즈 최소화)
-        stocks:      학습 종목 코드 리스트 (None이면 KOSPI200+KOSDAQ150 동적 수집, 실패 시 DEFAULT_TRAINING_STOCKS 폴백)
+        stocks:      학습 종목 코드 리스트 (None이면 DEFAULT_TRAINING_STOCKS 146개 고정 리스트 사용)
         test_ratio:  검증 세트 비율 (0~1)
     """
     if stocks is None:

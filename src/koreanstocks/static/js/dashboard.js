@@ -1663,6 +1663,10 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // 탭 5 — Settings
   loadTelegramStatus();
+  fetch("/api/version").then(r => r.json()).then(d => {
+    const el = document.getElementById("app-version");
+    if (el) el.textContent = "v" + d.version;
+  }).catch(() => {});
 
   // 거래일 여부 확인 (Tab 3, Tab 5 안내)
   checkTradingDay();

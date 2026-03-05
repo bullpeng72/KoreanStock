@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+from koreanstocks import VERSION
 from koreanstocks.api.routers import (
     recommendations,
     analysis,
@@ -19,7 +20,7 @@ STATIC_DIR = Path(__file__).parent.parent / "static"
 def create_app() -> FastAPI:
     app = FastAPI(
         title="KoreanStocks API",
-        version="0.3.7",
+        version=VERSION,
         description="KOSPI·KOSDAQ 종목 자동 스크리닝 + 텔레그램 리포트 플랫폼",
     )
 
@@ -34,6 +35,11 @@ def create_app() -> FastAPI:
     # Static 파일 마운트 (Reveal.js + 대시보드)
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    @app.get("/api/version", tags=["meta"])
+    async def get_version():
+        """앱 버전 반환."""
+        return {"version": VERSION}
 
     @app.get("/", include_in_schema=False)
     async def root():
