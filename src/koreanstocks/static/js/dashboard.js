@@ -637,8 +637,20 @@ function buildWlResult(res) {
     <div style="margin-bottom:8px;font-size:.88em">
       ${badgeHtml(ai.action)} &nbsp;${ai.summary || ""}
     </div>
+    ${res.current_price
+      ? `<div style="font-size:.85em;color:var(--text);margin-bottom:2px">💰 현재가: ₩${fmt(res.current_price)}</div>` : ""}
     ${ai.target_price
-      ? `<div style="font-size:.85em;color:var(--accent)">🎯 목표가: ₩${fmt(ai.target_price)}</div>` : ""}
+      ? (() => {
+          const upside = res.current_price
+            ? ((ai.target_price - res.current_price) / res.current_price * 100).toFixed(1)
+            : null;
+          const upsideStr = upside != null
+            ? ` <span style="color:${upside >= 0 ? 'var(--buy)' : 'var(--sell)'}">
+                (${upside >= 0 ? '+' : ''}${upside}%)</span>`
+            : '';
+          return `<div style="font-size:.85em;color:var(--accent)">🎯 목표가(10거래일): ₩${fmt(ai.target_price)}${upsideStr}</div>`;
+        })()
+      : ""}
     ${ai.strength  ? `<div style="font-size:.82em;margin-top:6px">✅ <strong>강점:</strong> ${ai.strength}</div>` : ""}
     ${ai.weakness  ? `<div style="font-size:.82em">⚠️ <strong>약점:</strong> ${ai.weakness}</div>` : ""}
     <div style="font-size:.82em;color:var(--muted);margin-top:6px">${ai.reasoning || ""}</div>
@@ -691,13 +703,24 @@ async function toggleWlHistory(code) {
     }
 
     el.innerHTML = history.map((h, idx) => {
-      const detailId  = `hist-detail-${code}-${idx}`;
-      const hasDetail = !!h.detail;
-      const ts        = h.date ? h.date.replace('T', ' ').substring(0, 16) : '—';
-      const techVal   = h.tech_score  != null ? Number(h.tech_score).toFixed(1)  : '—';
-      const mlVal     = h.ml_score    != null ? Number(h.ml_score).toFixed(1)    : '—';
-      const newsVal   = h.sentiment_score != null
-                          ? Number(h.sentiment_score).toFixed(1) : '—';
+      const detailId   = `hist-detail-${code}-${idx}`;
+      const hasDetail  = !!h.detail;
+      const ts         = h.date ? h.date.replace('T', ' ').substring(0, 16) : '—';
+      const techVal    = h.tech_score  != null ? Number(h.tech_score).toFixed(1)  : '—';
+      const mlVal      = h.ml_score    != null ? Number(h.ml_score).toFixed(1)    : '—';
+      const newsVal    = h.sentiment_score != null
+                           ? Number(h.sentiment_score).toFixed(1) : '—';
+      const curPrice   = h.detail?.current_price;
+      const tgtPrice   = h.detail?.ai_opinion?.target_price;
+      const priceStr   = curPrice ? `₩${fmt(curPrice)}` : null;
+      const upside     = (curPrice && tgtPrice)
+                           ? ((tgtPrice - curPrice) / curPrice * 100).toFixed(1)
+                           : null;
+      const tgtStr     = tgtPrice
+                           ? `→ 🎯 ₩${fmt(tgtPrice)}${upside != null
+                               ? ` <span style="color:${upside >= 0 ? 'var(--buy)' : 'var(--sell)'}">(${upside >= 0 ? '+' : ''}${upside}%)</span>`
+                               : ''}`
+                           : '';
 
       return `
         <div class="history-row">
@@ -712,6 +735,7 @@ async function toggleWlHistory(code) {
           </div>
           <div style="font-size:.78em;color:var(--muted);margin-top:3px">
             Tech <strong>${techVal}</strong> · ML <strong>${mlVal}</strong> · News <strong>${newsVal}</strong>
+            ${priceStr ? `&nbsp;·&nbsp; 💰 <strong style="color:var(--text)">${priceStr}</strong> ${tgtStr}` : ''}
           </div>
           <div style="font-size:.82em;margin-top:3px;color:var(--text)">${h.summary || ""}</div>
           ${hasDetail
