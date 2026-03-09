@@ -103,6 +103,10 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
       loadValueDefaults();
       _valueLoaded = true;
     }
+    if (btn.dataset.tab === "quality" && !_qualityLoaded) {
+      loadQualityDefaults();
+      _qualityLoaded = true;
+    }
   });
 });
 
@@ -541,6 +545,10 @@ async function loadWatchlist() {
       return;
     }
     container.innerHTML = wl.map(w => buildWlCard(w)).join("");
+    // 분석 버튼: data 속성으로 종목명 전달 (onclick 특수문자 취약점 방지)
+    container.querySelectorAll(".wl-analyze-btn").forEach(btn => {
+      btn.addEventListener("click", () => runWlAnalysis(btn.dataset.code, btn.dataset.name));
+    });
   } catch (e) {
     container.innerHTML = `<span style="color:var(--sell)">${e.message}</span>`;
   }
@@ -556,7 +564,8 @@ function buildWlCard(w) {
         </div>
       </div>
       <div class="wl-actions">
-        <button class="btn btn-primary btn-sm" onclick="runWlAnalysis('${w.code}','${w.name}')">
+        <button class="btn btn-primary btn-sm wl-analyze-btn"
+                data-code="${w.code}" data-name="${(w.name || w.code).replace(/"/g, '&quot;')}">
           🔍 실시간 심층 분석 실행
         </button>
         <button class="btn btn-secondary btn-sm" onclick="toggleWlHistory('${w.code}')">
@@ -630,6 +639,7 @@ function buildWlResult(res) {
 
   return `
     <div style="margin-bottom:10px">
+      ${res.composite_score != null ? scoreBarHtml("종합", res.composite_score) : ""}
       ${scoreBarHtml("Tech", res.tech_score)}
       ${scoreBarHtml("ML", res.ml_score)}
       ${scoreBarHtml("News", Math.min(100, Math.max(0, ((res.sentiment_score||0)+100)/2)))}
@@ -638,7 +648,11 @@ function buildWlResult(res) {
       ${badgeHtml(ai.action)} &nbsp;${ai.summary || ""}
     </div>
     ${res.current_price
-      ? `<div style="font-size:.85em;color:var(--text);margin-bottom:2px">💰 현재가: ₩${fmt(res.current_price)}</div>` : ""}
+      ? `<div style="font-size:.85em;color:var(--text);margin-bottom:2px">💰 현재가: ₩${fmt(res.current_price)}${
+          res.change_pct != null
+            ? ` <span class="${res.change_pct >= 0 ? 'pos' : 'neg'}">(${res.change_pct >= 0 ? '▲' : '▼'}${Math.abs(res.change_pct).toFixed(2)}%)</span>`
+            : ''
+        }</div>` : ""}
     ${ai.target_price
       ? (() => {
           const upside = res.current_price
@@ -683,11 +697,12 @@ function buildWlResult(res) {
     </div>` : ""}`;
 }
 
-async function toggleWlHistory(code) {
+async function toggleWlHistory(code, limit = 10) {
   const el = document.getElementById(`wl-history-${code}`);
   if (!el) return;
 
-  if (el.classList.contains("open")) {
+  // limit=10 초기 호출이면 이미 열려 있을 때 닫기, 더 보기 호출이면 그냥 새로 렌더
+  if (limit === 10 && el.classList.contains("open")) {
     el.classList.remove("open");
     return;
   }
@@ -696,7 +711,7 @@ async function toggleWlHistory(code) {
   el.innerHTML = `<span style="color:var(--muted);font-size:.82em">이력 조회 중…</span>`;
 
   try {
-    const history = await api(`/api/analysis/${code}/history?limit=5`);
+    const history = await api(`/api/analysis/${code}/history?limit=${limit}`);
     if (!history.length) {
       el.innerHTML = `<span style="color:var(--muted);font-size:.82em">이전 분석 데이터가 없습니다.</span>`;
       return;
@@ -706,10 +721,10 @@ async function toggleWlHistory(code) {
       const detailId   = `hist-detail-${code}-${idx}`;
       const hasDetail  = !!h.detail;
       const ts         = h.date ? h.date.replace('T', ' ').substring(0, 16) : '—';
-      const techVal    = h.tech_score  != null ? Number(h.tech_score).toFixed(1)  : '—';
-      const mlVal      = h.ml_score    != null ? Number(h.ml_score).toFixed(1)    : '—';
-      const newsVal    = h.sentiment_score != null
-                           ? Number(h.sentiment_score).toFixed(1) : '—';
+      const techVal      = h.tech_score  != null ? Number(h.tech_score).toFixed(1)  : '—';
+      const mlVal        = h.ml_score    != null ? Number(h.ml_score).toFixed(1)    : '—';
+      const newsVal      = h.sentiment_score != null ? Number(h.sentiment_score).toFixed(1) : '—';
+      const compositeVal = h.detail?.composite_score != null ? Number(h.detail.composite_score).toFixed(1) : null;
       const curPrice   = h.detail?.current_price;
       const tgtPrice   = h.detail?.ai_opinion?.target_price;
       const priceStr   = curPrice ? `₩${fmt(curPrice)}` : null;
@@ -734,7 +749,7 @@ async function toggleWlHistory(code) {
               : ''}
           </div>
           <div style="font-size:.78em;color:var(--muted);margin-top:3px">
-            Tech <strong>${techVal}</strong> · ML <strong>${mlVal}</strong> · News <strong>${newsVal}</strong>
+            ${compositeVal ? `종합 <strong style="color:var(--accent)">${compositeVal}</strong> · ` : ''}Tech <strong>${techVal}</strong> · ML <strong>${mlVal}</strong> · News <strong>${newsVal}</strong>
             ${priceStr ? `&nbsp;·&nbsp; 💰 <strong style="color:var(--text)">${priceStr}</strong> ${tgtStr}` : ''}
           </div>
           <div style="font-size:.82em;margin-top:3px;color:var(--text)">${h.summary || ""}</div>
@@ -745,6 +760,21 @@ async function toggleWlHistory(code) {
             : ''}
         </div>`;
     }).join("");
+
+    // 반환 건수가 요청 limit과 같으면 더 많은 이력이 있을 수 있음 → "더 보기" 버튼 추가
+    if (history.length === limit) {
+      el.insertAdjacentHTML('beforeend',
+        `<div style="text-align:center;margin-top:6px">
+           <button class="btn btn-secondary btn-sm wl-hist-more-btn"
+                   style="font-size:.75em" data-code="${code}" data-limit="${limit + 10}">
+             더 보기 (${limit + 10}건)
+           </button>
+         </div>`
+      );
+      el.querySelector('.wl-hist-more-btn').addEventListener('click', function() {
+        toggleWlHistory(this.dataset.code, parseInt(this.dataset.limit));
+      });
+    }
 
     // innerHTML 설정 후 버튼에 이벤트 리스너 직접 부착
     // (inline onclick + this 는 Firefox에서 this 참조가 불안정하므로 사용하지 않음)
@@ -1708,6 +1738,86 @@ async function runValueScreener() {
     card.style.display = "";
   } catch (e) {
     setStatus("val-status", `오류: ${e.message}`, true);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// Tab 8 — 우량주 스크리너
+// ═══════════════════════════════════════════════════════
+
+let _qualityLoaded = false;
+
+async function loadQualityDefaults() {
+  try {
+    const d = await api("/api/quality_stocks/filters");
+    if (d.roe_min       != null) document.getElementById("qual-roe-min").value       = d.roe_min;
+    if (d.op_margin_min != null) document.getElementById("qual-op-margin-min").value = d.op_margin_min;
+    if (d.yoy_min       != null) document.getElementById("qual-yoy-min").value       = d.yoy_min;
+    if (d.debt_max      != null) document.getElementById("qual-debt-max").value      = d.debt_max;
+    if (d.pbr_max       != null) document.getElementById("qual-pbr-max").value       = d.pbr_max;
+  } catch (e) { /* 기본값 유지 */ }
+}
+
+async function runQualityScreener() {
+  const market         = document.getElementById("qual-market").value;
+  const roeMin         = document.getElementById("qual-roe-min").value;
+  const opMarginMin    = document.getElementById("qual-op-margin-min").value;
+  const yoyMin         = document.getElementById("qual-yoy-min").value;
+  const debtMax        = document.getElementById("qual-debt-max").value;
+  const pbrMax         = document.getElementById("qual-pbr-max").value;
+  const candidateLimit = document.getElementById("qual-candidate-limit").value;
+
+  setStatus("qual-status", `⏳ 스크리닝 중… 시가총액 상위 ${candidateLimit}종목 펀더멘털 수집 + 필터링 (${candidateLimit > 200 ? "2~3분" : "1~2분"} 소요)`);
+
+  const card  = document.getElementById("qual-result-card");
+  const tbody = document.getElementById("qual-tbody");
+  card.style.display = "none";
+  tbody.innerHTML = "";
+
+  const params = new URLSearchParams({
+    market, roe_min: roeMin, op_margin_min: opMarginMin, yoy_min: yoyMin,
+    debt_max: debtMax, pbr_max: pbrMax, candidate_limit: candidateLimit,
+  });
+
+  try {
+    const data   = await api(`/api/quality_stocks?${params}`);
+    const stocks = data.stocks || [];
+    setStatus("qual-status", "");
+
+    if (!stocks.length) {
+      setStatus("qual-status", "필터 조건을 통과한 종목이 없습니다. 임계값을 완화해 보세요.", true);
+      return;
+    }
+
+    document.getElementById("qual-result-meta").textContent =
+      `${stocks.length}개 종목 (우량점수 내림차순)`;
+
+    tbody.innerHTML = stocks.map(s => {
+      const qScore  = s.quality_score ?? 0;
+      const qColor  = qScore >= 70 ? "var(--buy)" : qScore >= 50 ? "var(--hold)" : "var(--sell)";
+      const yoy     = s.op_income_yoy;
+      const yoyTxt  = yoy == null ? "—" : (yoy >= 0 ? `+${yoy.toFixed(1)}%` : `${yoy.toFixed(1)}%`);
+      const yoyCls  = yoy == null ? "" : yoy >= 0 ? "pos" : "neg";
+      const sector  = [s.market, s.sector].filter(Boolean).join(" · ");
+      const margin  = s.op_margin;
+      const div     = s.dividend_yield;
+      return `<tr>
+        <td><strong>${s.name || s.code}</strong>
+            <span style="font-size:.76em;color:var(--muted);margin-left:4px">${s.code}</span></td>
+        <td style="font-size:.8em;color:var(--muted)">${sector || "—"}</td>
+        <td style="text-align:right;color:var(--buy)">${s.roe != null ? s.roe.toFixed(1) + "%" : "—"}</td>
+        <td style="text-align:right">${margin != null ? margin.toFixed(1) + "%" : "—"}</td>
+        <td class="${yoyCls}" style="text-align:right">${yoyTxt}</td>
+        <td style="text-align:right">${s.debt_ratio != null ? s.debt_ratio.toFixed(1) + "%" : "—"}</td>
+        <td style="text-align:right">${s.pbr != null ? s.pbr.toFixed(2) + "x" : "—"}</td>
+        <td style="text-align:right">${div != null ? div.toFixed(2) + "%" : "—"}</td>
+        <td style="text-align:right;color:${qColor};font-weight:700">${qScore.toFixed(1)}</td>
+      </tr>`;
+    }).join("");
+
+    card.style.display = "";
+  } catch (e) {
+    setStatus("qual-status", `오류: ${e.message}`, true);
   }
 }
 

@@ -78,7 +78,7 @@ def run_analysis_sync(
     db=Depends(get_db),
     dp=Depends(get_data_provider),
 ):
-    """동기 실시간 분석 (Watchlist 상세 분석용). 최대 60초 대기."""
+    """동기 실시간 분석 (Watchlist 상세 분석용). 분석 완료까지 블로킹."""
     try:
         name = _resolve_name(code, dp, db)
         result = agent.analyze_stock(code, name)

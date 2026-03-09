@@ -153,14 +153,33 @@ def _chk_dart():
     if not dart_key:
         return {"status": "warn", "detail": "미설정 (선택 항목 — 공시 수집 비활성)"}
     import requests
-    r = requests.get(
+    from datetime import datetime
+
+    # 1차: 기업 정보 조회
+    r1 = requests.get(
         "https://opendart.fss.or.kr/api/company.json",
         params={"crtfc_key": dart_key, "corp_code": "00126380"},
         timeout=6,
     )
-    if r.status_code == 200 and r.json().get('status') == '000':
-        return {"status": "ok", "detail": "DART 공시 API 연결 정상"}
-    return {"status": "warn", "detail": f"DART API 응답 코드: {r.status_code}"}
+    if not (r1.status_code == 200 and r1.json().get('status') == '000'):
+        return {"status": "warn", "detail": f"DART company.json 응답 이상 (status={r1.status_code})"}
+
+    # 2차: 재무제표 단일 조회 (fnlttSinglAcnt) — 가치주 스크리너 핵심 소스
+    prev_year = str(datetime.now().year - 1)
+    r2 = requests.get(
+        "https://opendart.fss.or.kr/api/fnlttSinglAcnt.json",
+        params={
+            "crtfc_key": dart_key,
+            "corp_code": "00126380",  # 삼성전자
+            "bsns_year": prev_year,
+            "reprt_code": "11011",    # 사업보고서
+        },
+        timeout=8,
+    )
+    if r2.status_code == 200 and r2.json().get('status') == '000':
+        count = len(r2.json().get('list', []))
+        return {"status": "ok", "detail": f"DART API 정상 (company.json + fnlttSinglAcnt {prev_year}년 {count}건)"}
+    return {"status": "warn", "detail": f"company.json 정상 · fnlttSinglAcnt 응답 이상 (status={r2.status_code})"}
 
 
 def _chk_sqlite():
@@ -171,10 +190,106 @@ def _chk_sqlite():
         recs = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM analysis_history")
         hist = cur.fetchone()[0]
-    return {"status": "ok", "detail": f"recommendations {recs:,}건 · analysis_history {hist:,}건"}
+        try:
+            cur.execute("SELECT COUNT(*) FROM fundamental_cache")
+            fcache = cur.fetchone()[0]
+            fcache_str = f" · fundamental_cache {fcache:,}건"
+        except Exception:
+            fcache_str = ""
+    return {"status": "ok", "detail": f"recommendations {recs:,}건 · analysis_history {hist:,}건{fcache_str}"}
 
 
-# 소스 메타데이터 정의 (id, name, category, description, used_for, fn) — 9개
+def _chk_naver_fundamental():
+    """네이버 금융 종목 메인 — PER·PBR·배당수익률 파싱 상태 확인 (가치주 스크리너 1차 소스)."""
+    import requests
+    from bs4 import BeautifulSoup
+
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    # KT&G(033780) — PER·PBR·배당수익률 모두 있는 안정적 종목
+    r = requests.get(
+        "https://finance.naver.com/item/main.naver",
+        params={"code": "033780"},
+        headers=headers, timeout=10,
+    )
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    def _em(sel):
+        el = soup.select_one(sel)
+        return el.get_text(strip=True) if el else None
+
+    per = _em("em#_per")
+    pbr = _em("em#_pbr")
+
+    # 시가배당률: em#_dividend_rate(구) or 테이블 파싱(신)
+    div = _em("em#_dividend_rate")
+    if div is None:
+        strong = soup.find("strong", string="시가배당률(%)")
+        if strong:
+            tr = strong.find_parent("tr")
+            if tr:
+                for td in tr.select("td"):
+                    txt = td.get_text(strip=True).replace(",", "")
+                    try:
+                        float(txt)
+                        div = txt
+                        break
+                    except ValueError:
+                        pass
+
+    fields = []
+    if per:
+        fields.append(f"PER {per}")
+    if pbr:
+        fields.append(f"PBR {pbr}")
+    if div:
+        fields.append(f"배당수익률 {div}%")
+
+    if not fields:
+        return {"status": "warn", "detail": "PER·PBR·배당 모두 파싱 실패 (HTML 구조 변경 가능성)"}
+    missing = []
+    if not per:
+        missing.append("PER")
+    if not pbr:
+        missing.append("PBR")
+    if not div:
+        missing.append("배당수익률")
+    status = "warn" if missing else "ok"
+    detail = "KT&G 기준 " + " · ".join(fields)
+    if missing:
+        detail += f" (파싱 실패: {', '.join(missing)})"
+    return {"status": status, "detail": detail}
+
+
+def _chk_naver_coinfo():
+    """네이버 금융 coinfo (wisereport) — ROE·부채비율·영업이익률 파싱 상태 확인 (가치주 스크리너 2차 소스)."""
+    import requests
+    from bs4 import BeautifulSoup
+
+    # 삼성전자 — 데이터 안정적으로 제공
+    code = "005930"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': f'https://finance.naver.com/item/coinfo.naver?code={code}',
+    }
+    url = f"https://navercomp.wisereport.co.kr/v2/company/c1010001.aspx?cmp_cd={code}&target=finsum_Y"
+    r = requests.get(url, headers=headers, timeout=12)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    # 테이블에서 ROE·부채비율 행 탐색
+    found = []
+    for th in soup.find_all("th"):
+        txt = th.get_text(strip=True)
+        if "ROE" in txt or "부채비율" in txt or "영업이익률" in txt:
+            found.append(txt.split("(")[0].strip())
+
+    if not found:
+        return {"status": "warn", "detail": "ROE·부채비율·영업이익률 행 파싱 실패 (wisereport 구조 변경 가능성)"}
+    return {"status": "ok", "detail": f"wisereport 파싱 정상 — {', '.join(found[:3])} 확인"}
+
+
+# 소스 메타데이터 정의 (id, name, category, description, used_for, fn) — 11개
 _DATA_SOURCES = [
     {
         "id": "fdr_ohlcv",
@@ -245,19 +360,41 @@ _DATA_SOURCES = [
     {
         "id": "dart",
         "name": "DART 공시 API",
-        "category": "공시 데이터 (선택)",
-        "description": "금융감독원 전자공시 — 기업 공시 수집 (DART_API_KEY 필요)",
+        "category": "펀더멘털 데이터 (선택)",
+        "description": "금융감독원 전자공시 — ROE·부채비율 재무제표 원천 수집 (DART_API_KEY 필요). company.json + fnlttSinglAcnt 이중 검증",
         "source": "opendart.fss.or.kr",
-        "used_for": ["기업 공시 정보 수집 (미설정 시 뉴스 전용 모드 동작)"],
+        "used_for": ["ROE·부채비율 직접 계산 (대차대조표)", "영업이익·매출액 YoY 계산",
+                     "가치주·우량주 스크리너 3차 소스 (네이버 실패 시 폴백)"],
         "fn": _chk_dart,
+    },
+    {
+        "id": "naver_fundamental",
+        "name": "네이버 금융 — 종목 메인",
+        "category": "펀더멘털 데이터",
+        "description": "PER·PBR·EPS·배당수익률 수집 — 가치주·우량주 스크리너 1차 소스. 시가배당률(%) 테이블 파싱 방식 사용",
+        "source": "finance.naver.com/item/main.naver",
+        "used_for": ["PER·PBR 필터 (가치주·우량주 스크리너)", "배당수익률 (F-Score·value_score·quality_score)",
+                     "펀더멘털 캐시 1차 수집"],
+        "fn": _chk_naver_fundamental,
+    },
+    {
+        "id": "naver_coinfo",
+        "name": "네이버 금융 — coinfo (wisereport)",
+        "category": "펀더멘털 데이터",
+        "description": "ROE·부채비율·영업이익률·YoY 다년도 재무 요약 — 가치주·우량주 스크리너 2차 소스",
+        "source": "navercomp.wisereport.co.kr (네이버 금융 coinfo iframe)",
+        "used_for": ["ROE 필터 (가치주 ≥8%, 우량주 ≥12%)", "영업이익률 필터 (우량주 ≥10%)",
+                     "부채비율 필터", "영업이익 YoY 계산"],
+        "fn": _chk_naver_coinfo,
     },
     {
         "id": "sqlite",
         "name": "SQLite DB",
         "category": "로컬 저장소",
-        "description": "추천 결과·분석 이력·관심 종목·성과 추적 저장",
+        "description": "추천 결과·분석 이력·관심 종목·성과 추적·펀더멘털 당일 캐시 저장",
         "source": "data/storage/stock_analysis.db",
-        "used_for": ["추천 결과 저장·조회", "분석 이력 관리", "성과 추적 (5·10·20거래일)"],
+        "used_for": ["추천 결과 저장·조회", "분석 이력 관리", "성과 추적 (5·10·20거래일)",
+                     "펀더멘털 캐시 (fundamental_cache, 당일 유효)"],
         "fn": _chk_sqlite,
     },
 ]

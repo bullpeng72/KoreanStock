@@ -5,8 +5,6 @@ from datetime import date
 from typing import List, Dict, Any, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 
-import pandas as pd
-
 from koreanstocks.core.data.provider import data_provider
 from koreanstocks.core.engine.analysis_agent import analysis_agent
 from koreanstocks.core.data.database import db_manager
@@ -22,18 +20,29 @@ def _composite_score(x: Dict[str, Any]) -> float:
       - 모델 있음: tech 0.40 + ml 0.35 + sentiment 0.25
       - 모델 없음 (fallback): tech 0.65 + sentiment 0.35
         (ML이 tech_score 복사본이면 이중 가중을 피하기 위해 ml 제외)
+    sorted() key 함수로 사용되므로 예외 시 0.0 반환.
     """
-    sentiment_raw  = x.get('sentiment_score', 0)
-    sentiment_norm = max(0.0, min(100.0, (sentiment_raw + 100.0) / 2.0))
-    ml_count = x.get('ml_model_count', 0)
+    try:
+        _ss = x.get('sentiment_score')
+        sentiment_raw  = float(_ss) if _ss is not None else 0.0
+        sentiment_norm = max(0.0, min(100.0, (sentiment_raw + 100.0) / 2.0))
+        _mc = x.get('ml_model_count')
+        ml_count  = int(_mc) if _mc is not None else 0
+        _ts = x.get('tech_score')
+        _ms = x.get('ml_score')
+        tech_score = float(_ts) if _ts is not None else 50.0
+        ml_score   = float(_ms) if _ms is not None else 50.0
 
-    if ml_count == 0:
-        return x.get('tech_score', 50.0) * 0.65 + sentiment_norm * 0.35
-    return (
-        x.get('tech_score', 50.0) * 0.40
-        + x.get('ml_score',   50.0) * 0.35
-        + sentiment_norm             * 0.25
-    )
+        if ml_count == 0:
+            return tech_score * 0.65 + sentiment_norm * 0.35
+        return (
+            tech_score  * 0.40
+            + ml_score  * 0.35
+            + sentiment_norm * 0.25
+        )
+    except (TypeError, ValueError) as e:
+        logger.debug(f"_composite_score 계산 오류 (code={x.get('code', '?')}): {e}")
+        return 0.0
 
 
 def _apply_bucket_quota(
@@ -69,12 +78,13 @@ def _apply_bucket_quota(
         picked: List[Dict[str, Any]] = []
         deferred: List[Dict[str, Any]] = []
         for rec in candidates:
-            if rec['code'] in selected_codes:
+            if rec.get('code') in selected_codes:
                 continue
             sector = (rec.get('sector') or '').strip() or '__unknown__'
-            if sector_count.get(sector, 0) < max_per_sector:
+            cnt = sector_count.get(sector, 0)
+            if cnt < max_per_sector:
                 picked.append(rec)
-                sector_count[sector] = sector_count.get(sector, 0) + 1
+                sector_count[sector] = cnt + 1
             else:
                 deferred.append(rec)
             if len(picked) >= quota:
@@ -82,8 +92,10 @@ def _apply_bucket_quota(
         # 섹터 한도로 미달이면 보충
         if len(picked) < quota:
             for rec in deferred:
-                if rec['code'] not in selected_codes and rec not in picked:
+                if rec.get('code') not in selected_codes:
                     picked.append(rec)
+                    sector = (rec.get('sector') or '').strip() or '__unknown__'
+                    sector_count[sector] = sector_count.get(sector, 0) + 1  # deferred: 섹터 한도 초과 허용
                     if len(picked) >= quota:
                         break
         return picked
@@ -97,7 +109,7 @@ def _apply_bucket_quota(
         )
         picks = _pick(bucket_results, quota)
         selected.extend(picks)
-        selected_codes.update(r['code'] for r in picks)
+        selected_codes.update(r.get('code') for r in picks if r.get('code'))
 
         shortfall = quota - len(picks)
         if shortfall > 0:
@@ -110,14 +122,14 @@ def _apply_bucket_quota(
     # ── 2단계: 미달 버킷 교차 보충 (잉여 후보를 재태깅) ───────────
     for bucket_name, needed in bucket_shortfall.items():
         cross_pool = sorted(
-            [r for r in results if r['code'] not in selected_codes],
+            [r for r in results if r.get('code') not in selected_codes],
             key=_composite_score, reverse=True,
         )
         cross_picks = _pick(cross_pool, needed)
         for r in cross_picks:
             r['bucket'] = bucket_name  # 미달 버킷으로 재태깅
         selected.extend(cross_picks)
-        selected_codes.update(r['code'] for r in cross_picks)
+        selected_codes.update(r.get('code') for r in cross_picks if r.get('code'))
         if cross_picks:
             logger.info(
                 f"버킷 '{bucket_name}' 교차 보충 완료: "
@@ -129,11 +141,12 @@ def _apply_bucket_quota(
     # ── 3단계: 전체 limit 미달 시 잔여 종목으로 보충 (점수 순) ────
     if len(selected) < limit:
         remaining = sorted(
-            [r for r in results if r['code'] not in selected_codes],
+            [r for r in results if r.get('code') not in selected_codes],
             key=_composite_score, reverse=True,
         )
         picks = _pick(remaining, limit - len(selected))
         selected.extend(picks)
+        selected_codes.update(r.get('code') for r in picks if r.get('code'))
 
     return selected[:limit]
 
@@ -169,10 +182,11 @@ class RecommendationAgent:
         if theme_keywords:
             # 테마 지정 시: 테마 종목 + 거래량 랭킹 교집합 우선, 나머지 추가
             theme_df    = data_provider.get_stocks_by_theme(theme_keywords, market)
-            theme_codes = set(theme_df['code'].tolist())
+            theme_codes = set(theme_df['code'].tolist()) if 'code' in theme_df.columns else set()
             ranked      = data_provider.get_market_ranking(limit=200, market=market)
             candidate_codes = [c for c in ranked if c in theme_codes]
-            candidate_codes += [c for c in theme_df['code'].tolist() if c not in set(candidate_codes)]
+            existing = set(candidate_codes)
+            candidate_codes += [c for c in (theme_df['code'].tolist() if 'code' in theme_df.columns else []) if c not in existing]
 
             # 테마 모드에서도 버킷 분류 적용
             # 거래량·등락률 기반 버킷 맵을 가져와 테마 종목에 매핑
@@ -215,10 +229,15 @@ class RecommendationAgent:
         )
 
         # ── 2. 종목명 해석 ──────────────────────────────────────────
+        name_map: Dict[str, str] = (
+            dict(zip(stock_list['code'], stock_list['name']))
+            if 'code' in stock_list.columns and 'name' in stock_list.columns
+            else {}
+        )
         candidates: List[Tuple[str, str]] = []
         for code in candidate_codes:
-            row = stock_list[stock_list['code'] == code]
-            nm = row.iloc[0]['name'] if not row.empty else code
+            _nm = name_map.get(code)
+            nm = _nm if isinstance(_nm, str) and _nm else code
             candidates.append((code, nm))
 
         # ── 3. 병렬 분석 ────────────────────────────────────────────
@@ -278,7 +297,7 @@ class RecommendationAgent:
         """단일 종목 분석 — ThreadPoolExecutor 워커에서 호출"""
         try:
             analysis = analysis_agent.analyze_stock(code, name)
-            return analysis if "error" not in analysis else None
+            return analysis if analysis is not None and "error" not in analysis else None
         except Exception as e:
             logger.warning(f"Analysis failed for {code} ({name}): {e}")
             return None
@@ -288,34 +307,49 @@ class RecommendationAgent:
         session_date = date.today().isoformat()
         with db_manager.get_connection() as conn:
             cursor = conn.cursor()
-            for rec in recommendations:
-                composite = round(_composite_score(rec), 2)
+            saved_count = 0
+            for i, rec in enumerate(recommendations):
+                sp = f'sp_rec_{i}'
+                cursor.execute(f'SAVEPOINT {sp}')
                 try:
-                    detail_json = json.dumps(rec, ensure_ascii=False, default=str)
+                    _cs = rec.get('composite_score')
+                    composite = _cs if _cs is not None else round(_composite_score(rec), 2)
+                    try:
+                        detail_json = json.dumps(rec, ensure_ascii=False, default=str)
+                    except Exception as e:
+                        logger.warning(f"JSON serialization failed for {rec.get('code', '?')}: {e}")
+                        detail_json = None
+                    ai_opinion = rec.get('ai_opinion') or {}
+                    try:
+                        target_price = float(ai_opinion.get('target_price') or 0)
+                    except (TypeError, ValueError):
+                        target_price = 0.0
+                    cursor.execute(
+                        'DELETE FROM recommendations WHERE code = ? AND session_date = ?',
+                        (rec.get('code'), session_date)
+                    )
+                    cursor.execute('''
+                        INSERT INTO recommendations
+                            (code, type, score, reason, target_price, source, detail_json, session_date)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        rec.get('code'),
+                        ai_opinion.get('action', 'HOLD'),
+                        composite,
+                        ai_opinion.get('summary', ''),
+                        target_price,
+                        'AI_RECOMMENDER_V2',
+                        detail_json,
+                        session_date,
+                    ))
+                    cursor.execute(f'RELEASE {sp}')
+                    saved_count += 1
                 except Exception as e:
-                    logger.warning(f"JSON serialization failed for {rec.get('code', '?')}: {e}")
-                    detail_json = None
-
-                cursor.execute(
-                    'DELETE FROM recommendations WHERE code = ? AND session_date = ?',
-                    (rec['code'], session_date)
-                )
-                cursor.execute('''
-                    INSERT INTO recommendations
-                        (code, type, score, reason, target_price, source, detail_json, session_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    rec['code'],
-                    rec.get('ai_opinion', {}).get('action', 'HOLD'),
-                    composite,
-                    rec.get('ai_opinion', {}).get('summary', ''),
-                    rec.get('ai_opinion', {}).get('target_price', 0),
-                    'AI_RECOMMENDER_V2',
-                    detail_json,
-                    session_date,
-                ))
+                    cursor.execute(f'ROLLBACK TO {sp}')
+                    cursor.execute(f'RELEASE {sp}')
+                    logger.warning(f"DB 저장 실패 (code={rec.get('code', '?')}): {e}, 건너뜀")
             conn.commit()
-        logger.info(f"Saved {len(recommendations)} recommendations for {session_date}")
+        logger.info(f"Saved {saved_count}/{len(recommendations)} recommendations for {session_date}")
 
 
 recommendation_agent = RecommendationAgent()

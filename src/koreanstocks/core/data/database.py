@@ -219,12 +219,12 @@ class DatabaseManager:
                     (code, tech_score, ml_score, sentiment_score, action, summary, detail_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (
-                res['code'],
-                res['tech_score'],
-                res['ml_score'],
-                res['sentiment_score'],
-                res['ai_opinion']['action'],
-                res['ai_opinion']['summary'],
+                res.get('code'),
+                res.get('tech_score'),
+                res.get('ml_score'),
+                res.get('sentiment_score'),
+                res.get('ai_opinion', {}).get('action', 'N/A'),
+                res.get('ai_opinion', {}).get('summary', ''),
                 detail_json,
             ))
             conn.commit()
@@ -391,11 +391,15 @@ class DatabaseManager:
             conn.commit()
 
     def remove_from_watchlist(self, code: str):
-        """관심 종목 삭제"""
+        """관심 종목 삭제 — 연관 분석 이력·펀더멘털 캐시도 함께 정리.
+        AI 추천 결과(recommendations, recommendation_outcomes)는 보존."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('DELETE FROM watchlist WHERE code = ?', (code,))
+            cursor.execute('DELETE FROM analysis_history WHERE code = ?', (code,))
+            cursor.execute('DELETE FROM fundamental_cache WHERE code = ?', (code,))
             conn.commit()
+            logger.info(f"watchlist 삭제 — code={code}: watchlist·analysis_history·fundamental_cache 정리 완료")
 
     def get_watchlist(self) -> List[Dict]:
         """관심 종목 리스트 조회"""

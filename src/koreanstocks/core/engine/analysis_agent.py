@@ -1,8 +1,9 @@
+import math
 import time
 import pandas as pd
 import logging
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any
 import openai
 from openai import RateLimitError as _OpenAIRateLimitError
 import json
@@ -12,6 +13,25 @@ from koreanstocks.core.engine.indicators import indicators
 from koreanstocks.core.data.database import db_manager
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_float(val, ndigits: int = 2, fallback=None):
+    """float 변환 후 NaN/Inf 검사 — JSON 직렬화 안전값 반환."""
+    try:
+        v = float(val)
+        return fallback if (math.isnan(v) or math.isinf(v)) else round(v, ndigits)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _safe_int(val, fallback=None):
+    """int 변환 — NaN/None/오류 시 fallback 반환 (int(nan) ValueError 방지)."""
+    try:
+        v = float(val)
+        return fallback if (math.isnan(v) or math.isinf(v)) else int(v)
+    except (TypeError, ValueError):
+        return fallback
+
 
 class AnalysisAgent:
     """주식 데이터 분석 및 AI 의견 생성을 담당하는 에이전트"""
@@ -30,12 +50,14 @@ class AnalysisAgent:
 
         # 2. 기술적 지표 계산
         df_with_indicators = indicators.calculate_all(df)
-        tech_score = indicators.get_composite_score(df_with_indicators)
+        if df_with_indicators.empty:
+            return {"error": f"지표 계산 실패 — 데이터 부족 ({code})"}
+        tech_score = float(indicators.get_composite_score(df_with_indicators) or 0)
 
         # 3. 뉴스 감성 분석 (ML 예측보다 먼저 수행하여 블렌딩에 활용)
         from koreanstocks.core.engine.news_agent import news_agent
         news_res = news_agent.get_sentiment_score(name or code, stock_code=code)
-        sentiment_score = news_res.get("sentiment_score", 0)
+        sentiment_score = float(news_res.get("sentiment_score") or 0)
 
         # 4. ML 예측 점수 산출 (순수 ML 앙상블; sentiment 블렌딩은 composite 단계에서 일원화)
         from koreanstocks.core.engine.prediction_model import prediction_model
@@ -44,12 +66,18 @@ class AnalysisAgent:
             df_with_indicators=df_with_indicators,
             fallback_score=tech_score,
         )
-        ml_raw_score   = ml_res.get("ensemble_score", tech_score)   # 순수 ML 앙상블 점수
-        ml_model_count = ml_res.get("model_count", 0)               # 활성 모델 수 (composite 가중치 분기용)
+        ml_raw_score   = float(ml_res.get("ensemble_score") or tech_score)  # 순수 ML 앙상블 점수
+        ml_model_count = int(ml_res.get("model_count") or 0)              # 활성 모델 수 (composite 가중치 분기용)
+
+        # 종합 점수 (recommendation_agent와 동일 공식)
+        _sentiment_norm = max(0.0, min(100.0, (sentiment_score + 100.0) / 2.0))
+        if ml_model_count > 0:
+            composite_score = round(tech_score * 0.40 + ml_raw_score * 0.35 + _sentiment_norm * 0.25, 1)
+        else:
+            composite_score = round(tech_score * 0.65 + _sentiment_norm * 0.35, 1)
 
         # 참고용: ML + 뉴스 감성 블렌딩 점수 (composite 계산에는 미사용, 표시 전용)
-        _sentiment_norm_ref = max(0.0, min(100.0, (sentiment_score + 100.0) / 2.0))
-        ml_blended = round(0.65 * ml_raw_score + 0.35 * _sentiment_norm_ref, 2)
+        ml_blended = round(0.65 * ml_raw_score + 0.35 * _sentiment_norm, 2)
 
         # 5. 시장/섹터 정보 및 지수 수집 (AI 분석 컨텍스트용)
         stock_list = data_provider.get_stock_list()
@@ -60,40 +88,53 @@ class AnalysisAgent:
         market_indices = data_provider.get_market_indices()
 
         # 6. AI 분석 (최근 데이터 + 순수 ML 점수 + 뉴스 점수 + 시장/섹터 맥락)
-        current_price = float(df_with_indicators.iloc[-1]['close'])
+        current_price = _safe_float(df_with_indicators.iloc[-1]['close'], 0, fallback=0.0)
         ai_opinion = self._get_ai_opinion(
             name or code, df_with_indicators.tail(30), tech_score, ml_raw_score, news_res, current_price,
             market=market_val, sector=sector_val, market_indices=market_indices,
+            composite_score=composite_score,
         )
 
         # 7. 결과 정리
         latest = df_with_indicators.iloc[-1]
+        _bd = _safe_float(latest['bb_high'] - latest['bb_low']) if ('bb_low' in latest and 'bb_high' in latest) else None
+        _bb_pos = _safe_float((latest['close'] - latest['bb_low']) / _bd, 2) if _bd else None
         analysis_res = {
             "code": code,
             "name": name,
             "market": market_val,
             "sector": sector_val,
             "industry": industry_val,
-            "current_price": float(latest['close']),
-            "change_pct": float(latest['change']) * 100 if 'change' in latest else 0.0,
+            "current_price": current_price,
+            "change_pct": (
+                _safe_float(latest['change'] * 100, 2) if 'change' in latest and latest['change'] != 0
+                else (
+                    _safe_float(
+                        (float(df['close'].iloc[-1]) - float(df['close'].iloc[-2]))
+                        / float(df['close'].iloc[-2]) * 100, 2
+                    )
+                    if len(df) >= 2 and float(df['close'].iloc[-2]) != 0 else 0.0
+                )
+            ) or 0.0,
             "tech_score": tech_score,
             "ml_score":       round(ml_raw_score, 2),    # 순수 ML 앙상블 (composite 계산용)
             "ml_blended":     ml_blended,               # ML + 감성 블렌딩 참고값 (표시 전용)
             "ml_model_count": ml_model_count,           # 활성 모델 수 (0이면 fallback)
+            "composite_score": composite_score,         # 종합 점수 (tech+ml+sentiment 가중합)
             "sentiment_score": sentiment_score,
             "sentiment_info": news_res,
             "stats": {
-                "high_52w": float(df['high'].max()),
-                "low_52w": float(df['low'].min()),
-                "avg_vol": int(df['volume'].tail(20).mean()),
-                "current_vol": int(latest['volume'])
+                "high_52w":   _safe_float(df['high'].max(),              0),
+                "low_52w":    _safe_float(df['low'].min(),               0),
+                "avg_vol":    _safe_int(df['volume'].tail(20).mean()),
+                "current_vol":_safe_int(latest['volume']),
             },
             "indicators": {
-                "rsi": round(float(latest['rsi']), 2),
-                "macd": round(float(latest['macd']), 2),
-                "macd_sig": round(float(latest['macd_signal']), 2),
-                "sma_20": round(float(latest['sma_20']), 0),
-                "bb_pos": round(float((latest['close'] - latest['bb_low']) / (latest['bb_high'] - latest['bb_low'])) if (latest['bb_high'] - latest['bb_low']) != 0 else 0.5, 2)
+                "rsi":     _safe_float(latest['rsi'],           2),
+                "macd":    _safe_float(latest['macd'],          2),
+                "macd_sig":_safe_float(latest['macd_signal'],   2),
+                "sma_20":  _safe_float(latest['sma_20'],        0),
+                "bb_pos":  _bb_pos,
             },
             "ai_opinion": ai_opinion,
             "analysis_date": datetime.now().strftime('%Y-%m-%d %H:%M')
@@ -109,20 +150,28 @@ class AnalysisAgent:
 
     def _get_ai_opinion(self, name: str, recent_df: pd.DataFrame, tech_score: float, ml_score: float,
                         news_res: Dict, current_price: float = 0.0,
-                        market: str = '', sector: str = '', market_indices: Dict = None) -> Dict[str, Any]:
+                        market: str = '', sector: str = '', market_indices: Dict = None,
+                        composite_score: float = None) -> Dict[str, Any]:
         """GPT-4o-mini를 사용한 정성적 분석 (ML·뉴스 감성·시장/섹터 맥락 반영)"""
         try:
             # 최근 가격 흐름 요약 (종가, 거래량, 주요 지표 포함)
             indicator_cols = ['close', 'volume', 'rsi', 'macd', 'macd_signal', 'bb_low', 'bb_high']
             available_cols = [c for c in indicator_cols if c in recent_df.columns]
-            price_summary = recent_df[available_cols].tail(10).round(2).to_string()
+            price_summary = recent_df[available_cols].tail(10).round(2).fillna('').to_string()
 
             latest = recent_df.iloc[-1]
-            rsi_val = round(float(latest['rsi']), 1) if 'rsi' in latest else 'N/A'
-            macd_val = round(float(latest['macd']), 2) if 'macd' in latest else 'N/A'
-            macd_sig_val = round(float(latest['macd_signal']), 2) if 'macd_signal' in latest else 'N/A'
-            macd_direction = "골든크로스(상승)" if (macd_val != 'N/A' and macd_sig_val != 'N/A' and macd_val > macd_sig_val) else "데드크로스(하락)"
-            bb_pos = round(float((latest['close'] - latest['bb_low']) / (latest['bb_high'] - latest['bb_low'])), 2) if ('bb_high' in latest and (latest['bb_high'] - latest['bb_low']) != 0) else 'N/A'
+            rsi_val      = _safe_float(latest['rsi'],          1) if 'rsi'          in latest else None
+            macd_val     = _safe_float(latest['macd'],         2) if 'macd'         in latest else None
+            macd_sig_val = _safe_float(latest['macd_signal'],  2) if 'macd_signal'  in latest else None
+            if macd_val is not None and macd_sig_val is not None:
+                macd_direction = "골든크로스(상승)" if macd_val > macd_sig_val else "데드크로스(하락)"
+            else:
+                macd_direction = "N/A"
+            rsi_val      = rsi_val      if rsi_val      is not None else 'N/A'
+            macd_val     = macd_val     if macd_val     is not None else 'N/A'
+            macd_sig_val = macd_sig_val if macd_sig_val is not None else 'N/A'
+            _bb_denom = _safe_float(latest['bb_high'] - latest['bb_low']) if ('bb_low' in latest and 'bb_high' in latest) else None
+            bb_pos = _safe_float((latest['close'] - latest['bb_low']) / _bb_denom, 2) if _bb_denom else 'N/A'
 
             # 시장/섹터 맥락 문자열 구성
             mkt_lines = []
@@ -151,9 +200,10 @@ class AnalysisAgent:
             {market_context}
 
             [정량 점수]
-            - 기술적 지표 종합 점수: {tech_score}/100
+            - 종합 점수(가중합): {f'{composite_score:.1f}' if composite_score is not None else 'N/A'}/100  ← 핵심 판단 기준 (tech 40% + ML 35% + 감성 25%)
+            - 기술적 지표 점수: {tech_score}/100
             - 머신러닝 예측 점수: {ml_score}/100
-            - 뉴스 감성 점수: {news_res.get('sentiment_score', 0)} (-100~100, 양수면 호재)
+            - 뉴스 감성 점수: {float(news_res.get('sentiment_score') or 0)} (-100~100, 양수면 호재)
 
             [현재 기술적 지표]
             - 현재가: {int(current_price):,}원
@@ -174,8 +224,8 @@ class AnalysisAgent:
                 "strength": "강점 (최대 2개)",
                 "weakness": "약점 (최대 2개)",
                 "reasoning": "기술적 지표, ML 예측, 뉴스 심리를 모두 반영한 상세 추천 사유",
-                "action": "BUY, HOLD, SELL 중 하나 (영문 대문자)",
-                "target_price": "4주(20거래일) 목표가 (숫자만, 현재가 기준으로 BUY면 현재가 이상, SELL이면 현재가 이하로 설정)",
+                "action": "BUY, HOLD, SELL 중 하나 (반드시 영문 대문자 3종 중 하나만)",
+                "target_price": "10거래일 목표가 (숫자만, 현재가 기준으로 BUY면 현재가 이상, SELL이면 현재가 이하로 설정)",
                 "target_rationale": "목표가 산출의 구체적 근거"
             }}
             """
@@ -202,8 +252,11 @@ class AnalysisAgent:
                     else:
                         logger.error(f"[{name}] GPT Rate limit: 재시도 한도 초과")
                         return {"summary": "AI 분석 실패 (Rate limit)", "action": "N/A", "target_price": 0}
-            else:
-                return {"summary": "AI 분석 실패", "action": "N/A", "target_price": 0}
+
+            # action 정규화: 비표준 값(소문자·부가 텍스트 등) → BUY/HOLD/SELL
+            _parts = str(result.get('action', 'HOLD')).strip().upper().split()
+            raw_action = _parts[0].rstrip('.') if _parts else 'HOLD'
+            result['action'] = raw_action if raw_action in ('BUY', 'HOLD', 'SELL') else 'HOLD'
 
             # 데이터 정제: target_price를 숫자로 변환
             if 'target_price' in result:
@@ -216,7 +269,7 @@ class AnalysisAgent:
             # action ↔ target_price 일관성 보정
             if current_price > 0 and result.get('target_price', 0) > 0:
                 tp = result['target_price']
-                action = result.get('action', 'HOLD')
+                action = result['action']
                 if action == 'BUY' and tp < current_price * 0.98:
                     result['target_price'] = int(current_price * 1.03)
                     logger.warning(f"[{name}] BUY but target_price below current. Auto-adjusted to {result['target_price']}")

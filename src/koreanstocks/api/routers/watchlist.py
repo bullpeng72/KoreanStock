@@ -35,7 +35,13 @@ def add_to_watchlist(body: WatchlistAdd, db=Depends(get_db), dp=Depends(get_data
             name = row.iloc[0]["name"]
         else:
             # 폴백: 로컬 DB stocks 테이블 (오프라인·비거래일 안전)
-            name = db.get_stock_name(body.code) or body.code
+            name = db.get_stock_name(body.code)
+            if not name:
+                logger.warning(f"watchlist 추가: 미인식 종목 코드 {body.code!r} — 분석 실행 시 오류 발생 가능")
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"종목 코드 {body.code!r}를 찾을 수 없습니다. 올바른 6자리 코드인지 확인하세요.",
+                )
     db.add_to_watchlist(body.code, name)
     return {"code": body.code, "name": name}
 

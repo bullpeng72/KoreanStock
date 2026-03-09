@@ -590,6 +590,64 @@ def value(
 
 
 @app.command()
+def quality(
+    market: str = typer.Option("ALL", help="시장 필터: ALL | KOSPI | KOSDAQ"),
+    limit: int = typer.Option(20, help="최종 출력 종목 수"),
+    roe_min: float = typer.Option(12.0, help="ROE 하한 (%)"),
+    op_margin_min: float = typer.Option(10.0, help="영업이익률 하한 (%)"),
+    yoy_min: float = typer.Option(0.0, help="영업이익 YoY 하한 (%)"),
+    debt_max: float = typer.Option(100.0, help="부채비율 상한 (%)"),
+    pbr_max: float = typer.Option(6.0, help="PBR 상한"),
+):
+    """
+    [bold]우량주 스크리닝[/bold] — 장기(6개월~) 관점 수익성·성장성 분석
+
+    고ROE·고영업이익률·안정적 성장·건전한 재무구조를 갖춘 종목을
+    우량 점수(0~100)로 정렬합니다. PER 상한 없음.
+
+    [bold]필터 기준:[/bold]
+    [dim]  영업이익 흑자 / 영업이익률 하한 / ROE 하한 / 영이YoY 하한 / 부채비율 상한[/dim]
+
+    [bold]예시:[/bold]
+    [dim]  koreanstocks quality[/dim]
+    [dim]  koreanstocks quality --market KOSPI --limit 10[/dim]
+    [dim]  koreanstocks quality --roe-min 15 --op-margin-min 15[/dim]
+    """
+    from koreanstocks.core.engine.quality_screener import quality_screener
+
+    typer.echo(f"우량주 스크리닝 시작 (market={market}, limit={limit})...")
+    results = quality_screener.screen(
+        market=market,
+        roe_min=roe_min,
+        op_margin_min=op_margin_min,
+        yoy_min=yoy_min,
+        debt_max=debt_max,
+        pbr_max=pbr_max,
+        limit=limit,
+    )
+
+    if not results:
+        typer.echo("필터 통과 종목이 없습니다. 기준을 완화해 보세요.", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"\n{'종목':<12} {'ROE':>6} {'영업이익률':>8} {'영이YoY':>8} {'부채':>6} {'PBR':>6} {'우량점':>6}")
+    typer.echo("─" * 62)
+    for r in results:
+        def _f(v, fmt=".1f"):
+            return f"{v:{fmt}}" if v is not None else "  -"
+        typer.echo(
+            f"{r['name']:<12}"
+            f" {_f(r['roe']):>5}%"
+            f" {_f(r['op_margin']):>7}%"
+            f" {_f(r['op_income_yoy']):>7}%"
+            f" {_f(r['debt_ratio']):>5}%"
+            f" {_f(r['pbr']):>6}"
+            f" {r['quality_score']:>6}"
+        )
+    typer.echo(f"\n총 {len(results)}종목 선정 (우량점수 내림차순)")
+
+
+@app.command()
 def home(
     open_dir: bool = typer.Option(False, "--open", "-o", help="파일 탐색기로 홈 디렉토리 열기"),
     setup: bool = typer.Option(False, "--setup", "-s", help="셸 alias 스니펫 출력"),
