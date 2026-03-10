@@ -162,6 +162,13 @@ class DatabaseManager:
                 )
             ''')
 
+            # 인덱스 — 날짜 기반 조회 성능 최적화
+            for idx_sql in [
+                "CREATE INDEX IF NOT EXISTS idx_recommendations_session_date ON recommendations(session_date)",
+                "CREATE INDEX IF NOT EXISTS idx_rec_outcomes_session_date ON recommendation_outcomes(session_date)",
+            ]:
+                cursor.execute(idx_sql)
+
             # 9. 펀더멘털 캐시 테이블 (가치주 스크리너용, 당일 유효)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS fundamental_cache (

@@ -323,6 +323,20 @@ def sync(
         typer.echo("최신 데이터로 덮어쓰려면 --force 옵션을 사용하세요.")
         raise typer.Exit()
 
+    # sync 전 watchlist 백업 (로컬 DB가 있을 때만)
+    import sqlite3
+    watchlist_backup: list = []
+    if db_path.exists():
+        try:
+            with sqlite3.connect(db_path) as _wl_conn:
+                _wl_cur = _wl_conn.cursor()
+                _wl_cur.execute("SELECT code, name, added_at FROM watchlist")
+                watchlist_backup = _wl_cur.fetchall()
+            if watchlist_backup:
+                typer.echo(f"  관심 종목 {len(watchlist_backup)}개 백업")
+        except Exception:
+            pass  # watchlist 테이블 없으면 무시
+
     url = config.GITHUB_RAW_DB_URL
     typer.echo(f"다운로드: {url}")
 
@@ -372,6 +386,17 @@ def sync(
         # 정상 수신 후 최종 경로로 이동 (원자적 교체)
         tmp_path.replace(db_path)
         typer.echo(f"완료: {db_path}  ({downloaded // 1024:,} KB)")
+
+        # watchlist 복원
+        if watchlist_backup:
+            with sqlite3.connect(db_path) as _wl_conn:
+                _wl_cur = _wl_conn.cursor()
+                _wl_cur.executemany(
+                    "INSERT OR IGNORE INTO watchlist (code, name, added_at) VALUES (?, ?, ?)",
+                    watchlist_backup,
+                )
+                _wl_conn.commit()
+            typer.echo(f"  관심 종목 {len(watchlist_backup)}개 복원 완료")
 
     except httpx.RequestError as e:
         if tmp_path.exists():

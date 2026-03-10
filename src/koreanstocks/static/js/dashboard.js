@@ -1331,6 +1331,7 @@ async function loadOutcomes(days) {
     if (e.name === "AbortError") return;
     statsEl.className = "";
     statsEl.innerHTML = `<span style="color:var(--sell)">${esc(e.message)}</span>`;
+    if (listEl) listEl.innerHTML = "";
   }
 }
 
@@ -1343,7 +1344,7 @@ function _outcomeStatsHtml(stats) {
   }
 
   function statCard(label, ev, wr, ret) {
-    if (!ev || wr == null || ret == null) {
+    if (ev == null || wr == null || ret == null) {
       return `<div class="result-card">
         <div class="rc-label">${label}</div>
         <div class="rc-val" style="color:var(--muted)">—</div>
@@ -1411,9 +1412,9 @@ function _outcomeListHtml(outcomes) {
       <th style="text-align:left">종목</th>
       <th style="text-align:left">액션</th>
       <th>진입가</th>
-      <th>5거래일</th>
-      <th>10거래일</th>
-      <th>20거래일</th>
+      <th>5거래일 수익률</th>
+      <th>10거래일 수익률</th>
+      <th>20거래일 수익률</th>
       <th>AI 목표가</th>
     </tr></thead>
     <tbody>${rows}</tbody>

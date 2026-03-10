@@ -187,14 +187,14 @@ class StockPredictionModel:
             return cached['df']
         try:
             import yfinance as yf
-            raw = yf.download(['^VIX', '^GSPC'], period='2y', progress=False)
+            raw = yf.download(['^VIX', '^GSPC'], period='2y', progress=False, auto_adjust=True)
             if not raw.empty:
                 close = raw.xs('Close', level=0, axis=1) if isinstance(raw.columns, pd.MultiIndex) else raw['Close']
                 macro = pd.DataFrame(index=close.index)
                 macro.index = pd.to_datetime(macro.index).tz_localize(None)
                 macro['vix_level']     = close['^VIX'].values
-                macro['vix_change_5d'] = close['^VIX'].pct_change(5).values
-                macro['sp500_1m']      = close['^GSPC'].pct_change(20).values
+                macro['vix_change_5d'] = close['^VIX'].pct_change(5, fill_method=None).values
+                macro['sp500_1m']      = close['^GSPC'].pct_change(20, fill_method=None).values
                 macro = macro.ffill()
                 self._market_cache['__macro__'] = {'df': macro, 'date': today}
                 return macro
@@ -264,7 +264,7 @@ class StockPredictionModel:
             try:
                 scaler = self.scalers.get(name)
                 if scaler is not None:
-                    x = pd.DataFrame(scaler.transform(latest_x), columns=feat_cols)
+                    x = pd.DataFrame(scaler.transform(latest_x.values), columns=feat_cols)
                 else:
                     x = latest_x.copy()
                 cal = self.calibrations.get(name)

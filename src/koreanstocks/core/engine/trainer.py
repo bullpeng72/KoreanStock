@@ -659,7 +659,7 @@ def train_and_save(df_train: pd.DataFrame, df_test: pd.DataFrame,
         logger.info(f"  저장: {model_path}")
         logger.info(f"  저장: {scaler_path}")
 
-        quality_pass = test_auc >= MIN_MODEL_AUC
+        quality_pass = bool(test_auc >= MIN_MODEL_AUC)
         if quality_pass:
             logger.info(f"  ✅ 품질 게이트 통과 (test_auc={test_auc:.4f} ≥ {MIN_MODEL_AUC})")
         else:

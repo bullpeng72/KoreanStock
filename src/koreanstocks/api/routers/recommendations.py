@@ -16,7 +16,6 @@ def _run_analysis(limit: int, market: str, theme_keywords, theme_label: str):
     global _running, _run_theme_keywords, _run_theme_label
     _running = True
     try:
-        from koreanstocks.api.dependencies import get_recommendation_agent
         agent = get_recommendation_agent()
         agent.get_recommendations(
             limit=limit, market=market,
@@ -115,5 +114,5 @@ def recommendation_outcomes(
             "outcomes": get_recent_outcomes(days=days),
         }
     except Exception as e:
-        logger.error(f"성과 조회 오류: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"성과 조회 오류: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="성과 데이터 조회에 실패했습니다.")

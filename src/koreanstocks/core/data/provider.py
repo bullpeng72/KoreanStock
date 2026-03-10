@@ -128,7 +128,7 @@ class StockDataProvider:
             return df
         except Exception as e:
             self._krx_fail_timestamp = now  # 5분간 FDR 재시도 차단
-            logger.error(f"Error fetching stock list (FDR): {e}")
+            logger.warning(f"FDR 종목 목록 실패 (KIND API로 전환): {e}")
 
         # ── 2차: KIND API 폴백 ────────────────────────────────────────
         return self._fetch_kind_stock_list(now)
@@ -552,7 +552,7 @@ class StockDataProvider:
 
             if df_ranking is not None and not df_ranking.empty and 'volume' in df_ranking.columns:
                 df_ranking['volume'] = pd.to_numeric(df_ranking['volume'], errors='coerce').fillna(0)
-                df_ranking = df_ranking[df_ranking['volume'] > 0]
+                df_ranking = df_ranking[df_ranking['volume'] > 0].copy()
 
                 top_volume  = df_ranking.sort_values(by='volume', ascending=False).head(limit)
                 top_gainers = pd.DataFrame()

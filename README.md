@@ -1,27 +1,32 @@
 # 📈 Korean Stocks AI/ML Analysis System
 
-![version](https://img.shields.io/badge/version-0.4.1-blue)
+![version](https://img.shields.io/badge/version-0.4.2-blue)
+![python](https://img.shields.io/badge/python-3.11~3.13-green)
+![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
 > **KOSPI · KOSDAQ 종목을 AI와 머신러닝으로 분석하는 자동화 투자 보조 플랫폼**
 
 ---
 
 ## 목차
+
 1. [프로젝트 소개](#-프로젝트-소개)
 2. [주요 기능](#-주요-기능)
 3. [기술 스택](#-기술-스택)
 4. [시스템 아키텍처](#-시스템-아키텍처)
 5. [분석 파이프라인](#-분석-파이프라인)
-   - [AI 추천 파이프라인 (단기)](#버킷-기반-후보군-선정)
-   - [가치주 스크리닝 파이프라인 (중기)](#가치주-스크리닝-파이프라인)
-6. [점수 체계 해석](#-점수-체계-해석)
-7. [실전 투자 활용 가이드](#-실전-투자-활용-가이드)
-8. [설치 및 실행](#-설치-및-실행)
-   - [방법 A — PyPI 설치](#방법-a--pypi-설치-권장-분석-결과-조회-전용)
-   - [방법 B — 저장소 클론](#방법-b--저장소-클론-개발--자체-분석-실행)
-   - [API 키 설정](#api-키-설정--koreanstocks-init)
-9. [자동화 설정](#-자동화-설정-github-actions)
-10. [면책 조항](#-면책-조항)
+   - [단기 AI 추천](#단기-ai-추천-파이프라인-1-2주)
+   - [ML 앙상블 모델](#2단계--ml-앙상블-ml_score-0-100)
+   - [가치주 스크리닝](#가치주-스크리닝-파이프라인-중기-3-6개월)
+   - [우량주 스크리닝](#우량주-스크리닝-파이프라인-장기-6개월)
+6. [점수 체계](#-점수-체계-해석)
+7. [대시보드 메뉴](#-대시보드-메뉴-구성-8탭)
+8. [실전 투자 활용 가이드](#-실전-투자-활용-가이드)
+9. [설치 및 실행](#-설치-및-실행)
+10. [API 엔드포인트](#-api-엔드포인트)
+11. [자동화 설정](#-자동화-설정-github-actions)
+12. [변경 이력](#-변경-이력)
+13. [면책 조항](#-면책-조항)
 
 ---
 
@@ -31,7 +36,7 @@
 
 매일 장 마감 후 자동으로 실행되어 KOSPI·KOSDAQ 전 종목 중 **거래량 상위 · 상승 모멘텀 · 반등 후보** 버킷으로 분류된 종목을 스크리닝하고, 심층 분석 후 텔레그램으로 결과를 전송합니다.
 
-단기 AI 추천 외에, DART 공시 기반 펀더멘털(PER·PBR·ROE·부채비율)과 **Piotroski F-Score**를 활용한 **가치주 스크리닝**(중기 3~6개월), 그리고 ROE·영업이익률·재무건전성 기반의 **우량주 스크리닝**(장기 6개월+)도 지원합니다. 각 스크리너는 대시보드에서 직접 필터링하고 value_score / quality_score 순으로 조회할 수 있습니다.
+단기 AI 추천 외에, DART 공시 기반 펀더멘털과 **Piotroski F-Score**를 활용한 **가치주 스크리닝**(중기 3~6개월), ROE·영업이익률·재무건전성 기반의 **우량주 스크리닝**(장기 6개월+)도 지원합니다.
 
 ---
 
@@ -42,31 +47,33 @@
 | **AI 종목 추천** | 기술적 지표·ML·뉴스를 종합한 복합 점수로 유망 종목 선정 |
 | **버킷 기반 선정** | 거래량 상위·상승 모멘텀·반등 후보 3개 버킷 쿼터 보장 (배지 UI 표시) |
 | **날짜별 히스토리** | 과거 30일 분석 결과를 날짜 선택으로 조회 |
-| **추천 지속성 히트맵** | 종목별 연속 추천 일수를 히트맵으로 시각화 (연속 2일+ 시 🔥 배지) |
-| **DB 우선 조회 & 세션 캐시** | '새로 분석 실행' 클릭 시 당일 저장된 DB 결과 우선 표시 (불필요한 재분석 방지), 메뉴 이탈 후 재진입해도 결과 유지 |
-| **DB 자동 동기화** | GitHub Actions 완료 후 분석 DB를 저장소에 자동 커밋·푸시 → git clone 환경은 `git pull`, PyPI 설치 환경은 `koreanstocks sync` 한 번으로 최신 추천 결과 반영 |
+| **추천 지속성 히트맵** | 연속 추천(🔥)·비연속 반복 추천(🔄/📌) 배지로 신호 신뢰도 시각화 |
+| **DB 우선 조회 & 캐시** | 당일 저장된 DB 결과 우선 표시, 메뉴 이탈 후 재진입 시 세션 캐시 유지 |
+| **DB 자동 동기화** | GitHub Actions 완료 후 DB를 저장소에 자동 커밋·푸시 → `koreanstocks sync` 한 번으로 최신 결과 반영 |
 | **텔레그램 알림** | 종합점수 바·당일 등락률·RSI·뉴스 헤드라인·AI 강점 포함 구조화 리포트 발송 |
-| **전략 백테스팅** | RSI · MACD · COMPOSITE 전략 시뮬레이션 (단순보유 비교, 원금선 차트, 초보자 해석 가이드 포함) |
+| **전략 백테스팅** | RSI · MACD · COMPOSITE 전략 시뮬레이션 (단순보유 비교, 초보자 해석 가이드 포함) |
 | **관심 종목 관리** | Watchlist 등록 및 분석 이력 타임라인 제공 |
-| **테마 필터링** | AI · 반도체 · 이차전지 · 바이오 등 테마별 종목 발굴 |
-| **뉴스 기사 링크** | 감성 분석에 활용된 뉴스 기사 원문 링크 제공 |
-| **추천 성과 추적** | 5·10·20거래일 후 실제 수익률 자동 검증, 승률·목표가 달성률 통계 제공 (Web UI + CLI + 텔레그램) |
-| **가치주 스크리닝** | PER·PBR·ROE·부채비율·Piotroski F-Score 필터 + value_score 정렬, DART 기반 펀더멘털 자동 수집, 당일 인메모리 캐시 |
-| **우량주 스크리닝** | ROE·영업이익률·YoY성장·부채비율·PBR 필터 + quality_score 정렬, ROE 2개년 평균으로 지속성 확인, 장기(6개월+) 수익성 우량 기업 발굴 |
+| **추천 성과 추적** | 5·10·20거래일 후 실제 수익률 자동 검증, 승률·목표가 달성률 통계 제공 |
+| **가치주 스크리닝** | PER·PBR·ROE·부채비율·Piotroski F-Score 필터 + value_score 정렬, 당일 인메모리 캐시 |
+| **우량주 스크리닝** | ROE·영업이익률·YoY성장·부채비율·PBR 필터 + quality_score 정렬, ROE 2개년 평균으로 지속성 확인 |
+| **모델 신뢰도 대시보드** | ML 모델 AUC·과적합 갭·드리프트 등급·피처 중요도·재학습 권장 여부 확인 |
 
 ---
 
 ## 🛠 기술 스택
 
 ```
-UI          FastAPI + Reveal.js (일일 브리핑) + Vanilla JS (인터랙티브 대시보드)
-CLI         Typer (koreanstocks serve / recommend / analyze / train / init / sync / home / outcomes / value / quality)
-AI/LLM      OpenAI GPT-4o-mini
-ML          Scikit-learn (Random Forest, Gradient Boosting), XGBoost Ranker, LightGBM, CatBoost
+UI          FastAPI + Reveal.js (일일 브리핑) + Vanilla JS (인터랙티브 대시보드 8탭)
+CLI         Typer (10개 명령어: serve / recommend / analyze / train / outcomes / value / quality / init / sync / home)
+AI/LLM      OpenAI GPT-4o-mini (뉴스 감성 분석, AI 종합 의견)
+ML          Scikit-learn (Random Forest, Gradient Boosting) + XGBoost Ranker + LightGBM + CatBoost
+            → 5-모델 앙상블 (분류기 75% + 랜커 25%, AUC 기반 Softmax 가중치)
 기술 지표    ta (RSI, MACD, BB, SMA, OBV, ADX, VWAP, CMF, MFI, Stochastic, CCI, ATR, Donchian)
              + finta (SQZMI, VZO, Fisher Transform, Williams Fractal)
-데이터       FinanceDataReader, Naver News API, DART Open API (선택)
-DB          SQLite
+ML 피처     20개 (변동성·추세강도·시장 상대강도·모멘텀·finta·거래량·거시경제·극값감지)
+데이터       FinanceDataReader, KIND API (KRX 전종목), Naver News API, DART Open API (선택)
+             Yahoo Finance (VIX · S&P500 거시지표)
+DB          SQLite (data/storage/stock_analysis.db)
 자동화       GitHub Actions (평일 16:30 KST), Telegram Bot API
 시각화       Plotly, Matplotlib, Chart.js (백테스트 차트)
 언어         Python 3.11 ~ 3.13
@@ -76,52 +83,54 @@ DB          SQLite
 
 ## 🏗 시스템 아키텍처
 
-두 개의 독립적인 분석 파이프라인으로 구성됩니다: **단기 AI 추천** (기술·ML·뉴스)과 **중기 가치주 스크리닝** (DART 펀더멘털·F-Score).
+세 가지 독립적인 분석 파이프라인: **단기 AI 추천** · **중기 가치주 스크리닝** · **장기 우량주 스크리닝**
 
 ```mermaid
 graph TD
-    CLI["🖥 CLI<br/>serve · recommend · analyze · train<br/>outcomes · sync · init · home · value · quality"]
+    CLI["🖥 CLI<br/>serve · recommend · analyze · train<br/>outcomes · value · quality · init · sync · home"]
     USER["👤 사용자<br/>브라우저"]
 
     subgraph API["⚡ FastAPI  (koreanstocks.api)"]
-        RA["recommendations<br/>analysis · watchlist<br/>backtest · market · models"]
-        RV["value · quality<br/>GET /api/value_stocks<br/>GET /api/quality_stocks"]
+        RA["AI 추천 · 분석 · Watchlist<br/>백테스트 · 시장 · 모델"]
+        RV["가치주 · 우량주<br/>GET /api/value_stocks<br/>GET /api/quality_stocks"]
     end
 
-    subgraph FRONTEND["🌐 Frontend (dashboard.html — 8탭)"]
-        F_AI["AI 추천 탭<br/>Watchlist · Dashboard<br/>백테스트 · 모델신뢰도 · 설정"]
-        F_VAL["가치주 추천 탭<br/>PER·PBR·ROE·F-Score 필터<br/>value_score 정렬"]
-        F_QUAL["우량주 추천 탭<br/>ROE·영업이익률·YoY·부채비율 필터<br/>quality_score 정렬"]
+    subgraph FRONTEND["🌐 대시보드 (dashboard.html — 8탭)"]
+        F1["① Dashboard<br/>시장지수 · AI추천 · 히트맵"]
+        F2["② Watchlist<br/>관심종목 관리"]
+        F3["③ AI 추천<br/>ML 추천 · 성과 추적"]
+        F4["④ 가치주 추천<br/>F-Score · value_score"]
+        F5["⑤ 우량주 추천<br/>quality_score · ROE 지속성"]
+        F6["⑥ 백테스트<br/>전략 시뮬레이션"]
+        F7["⑦ 모델 신뢰도<br/>AUC · 피처 중요도"]
+        F8["⑧ 설정<br/>수동 실행 · 데이터 소스"]
     end
 
-    subgraph PIPELINE_AI["🤖 단기 AI 추천 파이프라인"]
+    subgraph PIPELINE_AI["🤖 단기 AI 추천 (1~2주)"]
         E1["indicators.py<br/>기술적 지표 → tech_score"]
-        E2["prediction_model.py<br/>ML 앙상블 → ml_score<br/>RF · GB · LGB · CB · XGBRanker"]
+        E2["prediction_model.py<br/>5-모델 앙상블 → ml_score<br/>RF · GB · LGB · CB · XGBRanker"]
         E3["news_agent.py<br/>뉴스 감성 → sentiment_score<br/>GPT-4o-mini"]
-        E4["analysis_agent.py<br/>4단계 심층 분석<br/>GPT 종합 의견"]
+        E4["analysis_agent.py<br/>4단계 심층 분석"]
         E5["recommendation_agent.py<br/>버킷 기반 종목 선정<br/>composite score 산출"]
-        E6["scheduler.py<br/>자동화 워크플로우"]
-        E7["trainer.py<br/>ML 모델 재학습"]
     end
 
-    subgraph PIPELINE_FUND["💰 펀더멘털 스크리닝 파이프라인"]
-        V1["value_screener.py<br/>Piotroski F-Score<br/>value_score 산출<br/>인메모리 캐시"]
-        Q1["quality_screener.py<br/>ROE 2개년 평균<br/>quality_score 산출<br/>인메모리 캐시"]
+    subgraph PIPELINE_FUND["💰 펀더멘털 스크리닝"]
+        V1["value_screener.py<br/>중기 가치주 (3~6개월)<br/>Piotroski F-Score + value_score"]
+        Q1["quality_screener.py<br/>장기 우량주 (6개월+)<br/>quality_score · ROE 2개년 평균"]
     end
 
     subgraph DATA["📊 Data Layer"]
-        D1["provider.py<br/>FinanceDataReader · KIND API<br/>주가 OHLCV · 종목 목록<br/>가치주 후보군(시가총액 기준)"]
-        D2["fundamental_provider.py<br/>DART Open API<br/>PER · PBR · ROE · 부채비율<br/>영업이익YoY · 연도 폴백"]
-        D3["database.py<br/>SQLite CRUD<br/>추천 결과 · 분석 이력<br/>워치리스트 · 뉴스 캐시"]
+        D1["provider.py<br/>FinanceDataReader · KIND API<br/>OHLCV · 시장지수 · 종목목록"]
+        D2["fundamental_provider.py<br/>DART Open API<br/>PER · PBR · ROE · 부채비율"]
+        D3["database.py<br/>SQLite CRUD<br/>추천결과 · 분석이력 · 뉴스캐시"]
     end
 
-    subgraph EXT["🌐 외부 데이터 소스"]
-        X1["FinanceDataReader<br/>OHLCV · 시장지수"]
-        X2["KIND API<br/>KRX 전종목 (2,657개)"]
-        X3["Naver News API<br/>종목 뉴스"]
-        X4["DART Open API<br/>재무제표 공시"]
-        X5["OpenAI GPT-4o-mini<br/>감성 분석 · AI 의견"]
-        X6["Yahoo Finance<br/>VIX · S&P500 (거시지표)"]
+    subgraph EXT["🌐 외부 데이터"]
+        X1["FinanceDataReader / KIND API<br/>OHLCV · 종목목록"]
+        X2["Naver News API<br/>종목 뉴스"]
+        X3["DART Open API<br/>재무제표 공시"]
+        X4["OpenAI GPT-4o-mini<br/>감성 분석 · AI 의견"]
+        X5["Yahoo Finance<br/>VIX · S&P500"]
     end
 
     subgraph STORAGE["💾 저장소"]
@@ -129,15 +138,9 @@ graph TD
         S2["models/saved/*.pkl<br/>학습된 ML 모델"]
     end
 
-    subgraph UTILS["🛠 Utils"]
-        U1["backtester.py"]
-        U2["notifier.py<br/>텔레그램"]
-        U3["outcome_tracker.py<br/>성과 추적"]
-    end
-
     CLI -->|서버 기동| API
     CLI -->|직접 실행| PIPELINE_AI
-    CLI -->|koreanstocks value/quality| PIPELINE_FUND
+    CLI -->|value / quality| PIPELINE_FUND
 
     USER --> FRONTEND
     FRONTEND -->|REST| API
@@ -145,203 +148,125 @@ graph TD
     API --> RV --> PIPELINE_FUND
 
     PIPELINE_AI --> E1 & E2 & E3
-    E1 & E2 & E3 --> E4 --> E5
-    E5 --> D3
-    E6 --> PIPELINE_AI
-    E7 --> S2
-    E2 --> S2
+    E1 & E2 & E3 --> E4 --> E5 --> D3
 
     PIPELINE_FUND --> V1 & Q1
-    V1 --> D1 & D2
-    Q1 --> D1 & D2
+    V1 & Q1 --> D1 & D2
 
-    D1 --> X1 & X2
-    D2 --> X4
-    E3 --> X3 & X5
-    E4 --> X5
-    E1 & E2 --> X6
+    D1 --> X1
+    D2 --> X3
+    E3 --> X2 & X4
+    E4 --> X4
+    E1 & E2 --> X5
 
     D3 --> S1
-    U3 --> D3
-    U2 --> X5
-    E5 --> U2
-```
-
-```
-KoreanStocks/
-├── pyproject.toml                       # pip 빌드 설정 (koreanstocks CLI 진입점)
-├── requirements.txt                     # 개발/테스트 전용 (pytest 등)
-├── src/
-│   └── koreanstocks/
-│       ├── __init__.py                  # VERSION = "0.4.1"
-│       ├── cli.py                       # Typer CLI (serve/recommend/analyze/train/init/sync/home/outcomes/value/quality)
-│       ├── api/
-│       │   ├── app.py                   # FastAPI 앱 팩토리, StaticFiles 마운트
-│       │   ├── dependencies.py          # 공통 의존성
-│       │   └── routers/
-│       │       ├── recommendations.py   # GET/POST /api/recommendations
-│       │       ├── analysis.py          # GET/POST /api/analysis/{code}
-│       │       ├── watchlist.py         # CRUD /api/watchlist
-│       │       ├── backtest.py          # GET /api/backtest
-│       │       ├── market.py            # GET /api/market
-│       │       ├── models.py            # GET /api/model_health
-│       │       ├── value.py             # GET /api/value_stocks (가치주 스크리닝)
-│       │       └── quality.py           # GET /api/quality_stocks (우량주 스크리닝)
-│       ├── static/
-│       │   ├── index.html               # Reveal.js 일일 브리핑 슬라이드
-│       │   ├── dashboard.html           # 인터랙티브 대시보드 (8탭)
-│       │   ├── js/
-│       │   │   ├── slides.js            # 슬라이드 동적 생성
-│       │   │   └── dashboard.js         # 대시보드 인터랙션
-│       │   └── css/
-│       │       └── theme.css            # 공통 스타일
-│       └── core/
-│           ├── config.py                # 환경변수 및 설정 관리 (VERSION 포함)
-│           ├── data/
-│           │   ├── provider.py              # 주가 데이터 수집 (FinanceDataReader + KIND API)
-│           │   ├── fundamental_provider.py  # DART 기반 펀더멘털 수집 (ROE·부채비율·PER·PBR)
-│           │   └── database.py              # SQLite 관리 (분석 결과, 워치리스트)
-│           ├── engine/
-│           │   ├── indicators.py            # 기술적 지표 계산 (RSI, MACD, BB, SMA, OBV)
-│           │   ├── features.py              # 공유 피처 추출 (trainer·prediction_model 공용, 20개)
-│           │   ├── strategy.py              # 전략별 시그널 생성 (TechnicalStrategy)
-│           │   ├── prediction_model.py      # ML 앙상블 예측 (RF · GB · LGB · CB · XGBRanker 앙상블)
-│           │   ├── news_agent.py            # 뉴스 수집 + 감성 분석 (GPT-4o-mini)
-│           │   ├── analysis_agent.py        # 종목 심층 분석 오케스트레이터
-│           │   ├── recommendation_agent.py  # 버킷 기반 종목 선정 + 추천 생성
-│           │   ├── value_screener.py        # 가치주 스크리닝 엔진 (Piotroski F-Score + value_score)
-│           │   ├── quality_screener.py      # 우량주 스크리닝 엔진 (quality_score + ROE 2개년 평균)
-│           │   ├── trainer.py               # ML 모델 학습 워크플로우
-│           │   └── scheduler.py             # 자동화 워크플로우
-│           └── utils/
-│               ├── backtester.py        # 전략 성과 검증 엔진
-│               ├── notifier.py          # 텔레그램 리포트 발송
-│               └── outcome_tracker.py   # 추천 결과 검증 (5·10·20거래일 후 성과 기록)
-├── models/saved/                        # 학습된 ML 모델 및 파라미터
-├── data/storage/                        # SQLite 데이터베이스 파일
-├── train_models.py                      # ML 모델 재학습 스크립트 (진입점)
-├── tests/
-│   ├── test_backtester.py               # 백테스터 단위 테스트 (pytest)
-│   └── compat_check.py                  # Python 3.11~3.13 호환성 검증
-└── .github/workflows/
-    └── daily_analysis.yml               # GitHub Actions 자동화 스케줄러
+    E2 --> S2
 ```
 
 ---
 
 ## 🔬 분석 파이프라인
 
-### 버킷 기반 후보군 선정
+### 단기 AI 추천 파이프라인 (1~2주)
+
+#### 버킷 기반 후보군 선정
 
 ```mermaid
 flowchart TD
-    A["FinanceDataReader<br/>KIND API<br/>전체 종목 수집"] --> B["시장 필터<br/>KOSPI / KOSDAQ / ALL"]
-    B --> V["거래량 상위<br/>40% 버킷"]
-    B --> M["상승 모멘텀<br/>+2%~+15%<br/>35% 버킷"]
-    B --> R["반등 후보<br/>거래량 상위 중 하락<br/>25% 버킷"]
+    A["FinanceDataReader + KIND API<br/>KOSPI · KOSDAQ 전체 종목"] --> B["시장 필터<br/>KOSPI / KOSDAQ / ALL"]
+    B --> V["🟦 거래량 상위<br/>40% 쿼터"]
+    B --> M["🟩 상승 모멘텀<br/>+2%~+15%<br/>35% 쿼터"]
+    B --> R["🟥 반등 후보<br/>거래량 상위 중 하락<br/>25% 쿼터"]
 
-    V & M & R --> POOL["분석 풀 구성<br/>min(limit × 8, 80)개<br/>limit=9 → 72종목"]
+    V & M & R --> POOL["분석 풀 구성<br/>min(limit × 8, 80)개<br/>limit=9 → 최대 72종목"]
 ```
 
-### 종목별 심층 분석 (4단계)
+#### 종목별 심층 분석 (4단계 병렬)
 
 ```mermaid
 flowchart TD
-    POOL["분석 풀<br/>최대 80종목"] --> PAR["병렬 분석<br/>max_workers=5<br/>timeout=60s"]
+    POOL["분석 풀 (최대 80종목)"] --> PAR["병렬 분석<br/>max_workers=5 · timeout=60s"]
 
-    PAR --> T["1단계<br/>기술적 지표<br/>tech_score 0~100"]
-    PAR --> ML["2단계<br/>ML 앙상블<br/>ml_score 0~100"]
-    PAR --> N["3단계<br/>뉴스 감성 분석<br/>sentiment -100~100"]
+    PAR --> T["1단계 기술적 지표<br/>tech_score 0~100<br/>추세(40) + 모멘텀(30) + BB/CMF/거래량(30)"]
+    PAR --> ML["2단계 ML 앙상블<br/>ml_score 0~100<br/>RF · GB · LGB · CB + XGBRanker<br/>20개 피처 · 101분위 캘리브레이션"]
+    PAR --> N["3단계 뉴스 감성<br/>sentiment_score -100~100<br/>GPT-4o-mini · 지수감쇠 시간가중"]
 
-    T & ML & N --> GPT["4단계<br/>GPT-4o-mini<br/>AI 종합 의견"]
-    GPT --> C["종합 점수 산출<br/>tech×0.40 + ml×0.35<br/>+ sentiment_norm×0.25"]
-    C --> Q["버킷 쿼터 기반<br/>최종 N종목 선정<br/>섹터 다양성 고려"]
+    T & ML & N --> GPT["4단계 GPT-4o-mini<br/>AI 종합 의견<br/>BUY/HOLD/SELL · 목표가 · 강점/약점"]
+    GPT --> C["종합 점수 산출<br/>tech×0.40 + ml×0.35 + sentiment_norm×0.25"]
+    C --> Q["버킷 쿼터 기반 최종 N종목<br/>섹터 다양성 고려"]
     Q --> DB[("SQLite DB<br/>날짜별 저장")]
-    Q --> TG["텔레그램<br/>리포트 발송"]
+    Q --> TG["📱 텔레그램<br/>구조화 리포트"]
 ```
 
-#### 1단계 — 기술적 지표 (tech_score, 0–100)
-
-```
-지표: SMA 5/20/60/120, MACD, RSI(14), Bollinger Bands, OBV, Stochastic, CCI, ATR
-      + ADX (DI+/DI−), CMF, VZO, Fisher Transform, Williams Fractal (finta)
-
-구성: ① 추세   (최대 40점) — SMA, MACD 골든크로스, ADX 방향
-      ② 모멘텀 (최대 30점) — RSI × MACD 방향 맥락 보정
-      ③ 위치   (최대 30점) — BB 위치 + CMF 자금흐름 + 거래량 확인
-```
-
-#### 2단계 — ML 앙상블 (ml_score, 0–100)
-
-```
-모델: RF · GB · LGB · CB (AUC 기반 가중 앙상블, 이진 분류) + XGBRanker (rank:ndcg, 크로스섹셔널 직접 최적화)
-피처: 20개 (순수 기술지표 + 거시경제, pykrx 의존성 없음)
-  · 변동성·추세강도 (4): ATR 비율(rolling 60일 percentile), ADX, BB 너비, BB 위치
-  · 시장 상대강도 (1): 3개월 시장 초과수익 (vs KS11/KQ11)
-  · 모멘텀·추세 (5): 52주 고점 비율, 모멘텀 가속도, MACD diff, MACD diff 5일 기울기, 가격/SMA5 비율
-  · finta 지표 (2): Fisher Transform, Williams Fractal (5일)
-  · 거래량·강도 (4): MFI, VZO, 52주 저가 대비 반등 위치, OBV 추세
-  · 거시경제 (2): VIX 레벨, S&P500 1개월 수익률
-  · 극값감지·반전 (2): RSI, CCI percentile
-타깃: 10거래일 후 수익률 상위 25% = 1 / 하위 25% = 0 (중간 50% 제외, neutral zone)
-출력: 이진 분류 확률(RF·GB·LGB·CB) + Ranker 점수(XGBRanker) → 101분위수 캘리브레이션 → 0~100 균등 스케일
-폴백: 모델 없을 경우 tech_score로 대체
-```
-
-#### 3단계 — 뉴스 감성 분석 (sentiment_score, -100–100)
-
-```
-소스: Naver News API (display=50, 중복 제거 후 고유 기사 확보)
-    + DART 공시 API (최근 30일, 유상증자·합병·수주 등 공식 공시, 선택)
-가중치: 지수 감쇠 시간 가중치 (오늘=1.00 / 7일 전=0.09)
-분석: GPT-4o-mini (temperature=0.1, 퀀트 애널리스트 시스템 프롬프트)
-캐시: L1 메모리 + L2 SQLite 당일 캐시 (API 비용 절감)
-```
-
-#### 4단계 — AI 종합 의견
-
-```
-입력: 전 단계 데이터 + 점수 기준표
-출력: action (BUY/HOLD/SELL), 요약, 강점, 약점, 추천 사유, 목표가
-보정: action과 목표가 일관성 자동 검증
-```
-
-### 종합 점수 공식
+#### 종합 점수 공식
 
 ```mermaid
 flowchart LR
     T["Tech Score<br/>0~100"] -->|"× 0.40"| SUM["종합 점수<br/>0~100"]
     ML["ML Score<br/>0~100"] -->|"× 0.35"| SUM
-    N["News Score<br/>-100~100<br/>→ 정규화 0~100"] -->|"× 0.25"| SUM
-
+    N["News Score<br/>-100~100 → 정규화 0~100"] -->|"× 0.25"| SUM
     SUM --> FB["※ ML 모델 없을 때<br/>tech×0.65 + sentiment_norm×0.35"]
-
     style FB fill:#f9f,stroke:#999,stroke-dasharray:5 5
 ```
 
 > `sentiment_norm = (sentiment_score + 100) / 2`  → 0~100 정규화
 
-### 가치주 스크리닝 파이프라인
+---
 
-AI 추천과 독립적으로 실행되는 중기(3~6개월) 저평가 종목 발굴 파이프라인입니다.
+### 2단계 — ML 앙상블 (ml_score, 0~100)
+
+#### 5-모델 앙상블 구조
+
+```mermaid
+flowchart LR
+    subgraph FEAT["입력 피처 (20개)"]
+        F1["변동성·추세강도<br/>atr_ratio · adx<br/>bb_width · bb_position"]
+        F2["시장 상대강도<br/>rs_vs_mkt_3m"]
+        F3["모멘텀·추세<br/>high_52w_ratio · mom_accel<br/>macd_diff · macd_slope_5d<br/>price_sma_5_ratio"]
+        F4["finta 지표<br/>fisher · bullish_fractal_5d"]
+        F5["거래량·강도<br/>mfi · vzo · obv_trend<br/>low_52w_ratio"]
+        F6["극값감지·반전<br/>rsi · cci_pct"]
+        F7["거시경제<br/>vix_level · sp500_1m"]
+    end
+
+    subgraph MODELS["5-모델 앙상블"]
+        RF["Random Forest<br/>(분류기)"]
+        GB["Gradient Boosting<br/>(분류기)"]
+        LGB["LightGBM<br/>(분류기)"]
+        CB["CatBoost<br/>(분류기)"]
+        XGB["XGBoost Ranker<br/>(rank:ndcg)"]
+    end
+
+    subgraph AGG["집계"]
+        CLS["분류기 평균<br/>AUC 기반 Softmax 가중치<br/>75%"]
+        RNK["랜커 점수<br/>25%"]
+        CAL["101분위수 캘리브레이션<br/>→ 0~100 균등 스케일"]
+    end
+
+    FEAT --> MODELS
+    RF & GB & LGB & CB --> CLS
+    XGB --> RNK
+    CLS & RNK --> CAL
+```
+
+**ML 학습 설정:**
+- **타깃:** 10거래일 후 수익률 상위 25% = 1 / 하위 25% = 0 (중간 50% neutral zone 제외)
+- **Walk-Forward CV:** VAL_STEP=10 거래일, 약 48 fold, Purging 20 거래일
+- **품질 게이트:** test_AUC ≥ 0.52 통과 시에만 저장 (미통과 시 tech_score 폴백)
+
+---
+
+### 가치주 스크리닝 파이프라인 (중기 3~6개월)
 
 ```mermaid
 flowchart TD
-    A["Naver 시가총액 순위 페이지<br/>병렬 스크래핑<br/>(100/200/300종목 선택)"] --> B["사전 필터<br/>PER > 0 · ROE > 0<br/>시가총액 500억 이상"]
-    B --> C["DART Open API<br/>펀더멘털 수집<br/>PER · PBR · ROE<br/>부채비율 · 영업이익YoY"]
-    C --> D["6단계 필터<br/>PER ≤ 25 · PBR ≤ 3<br/>ROE ≥ 5% · 부채비율 ≤ 200%<br/>영업이익YoY ≥ -20%<br/>F-Score ≥ 4"]
-    D --> E["Piotroski F-Score<br/>9점 만점<br/>수익성(P1~P3)<br/>안전성(L1~L3)<br/>성장성(E1~E3)"]
-    D --> F["value_score<br/>0~100점<br/>PER·PBR·ROE<br/>부채비율·영업이익YoY"]
-    E & F --> G["복합 정렬<br/>value_score × 0.7<br/>+ F-Score × 0.3"]
-    G --> H["결과 반환<br/>당일 인메모리 캐시<br/>(동일 조건 재실행 0초)"]
-```
-
-#### DART 연도 폴백 순서
-
-```
-1순위: (year-1) 사업보고서 (11011)   — 전년도 확정 실적
-2순위: (year-1) 반기보고서 (11012)   — 전년도 상반기 잠정
-3순위: (year-2) 사업보고서 (11011)   — 전전년도 (최후 수단)
+    A["Naver 시가총액 순위 페이지<br/>병렬 스크래핑<br/>탐색 범위: 100 / 200 / 300종목"] --> B["사전 필터<br/>PER > 0 · ROE > 0<br/>시가총액 500억 이상"]
+    B --> C["DART Open API<br/>펀더멘털 수집<br/>PER · PBR · ROE · 부채비율 · 영업이익YoY<br/>※ 연도 폴백: 전년사업보고서 → 반기 → 전전년"]
+    C --> D["6단계 필터<br/>PER ≤ 25 · PBR ≤ 3<br/>ROE ≥ 8% · 부채비율 ≤ 150%<br/>영업이익YoY ≥ -15% · F-Score ≥ 4"]
+    D --> E["Piotroski F-Score<br/>9점 만점<br/>수익성(P1~P3) + 안전성(L1~L3) + 성장성(E1~E3)"]
+    D --> F["value_score<br/>0~100점<br/>PER(25) + PBR(15) + ROE(20)<br/>부채비율(15) + 영업이익YoY(30) + 배당(10)"]
+    E & F --> G["복합 정렬<br/>value_score × 0.7 + F-Score_normalized × 0.3"]
+    G --> H["결과 반환<br/>당일 인메모리 캐시<br/>동일 조건 재실행 → 즉시 반환"]
 ```
 
 #### Piotroski F-Score 구성 (9점)
@@ -349,22 +274,34 @@ flowchart TD
 | 구분 | 항목 | 기준 |
 |------|------|------|
 | **수익성 (P1~P3)** | P1 ROA | 당기순이익 / 총자산 > 0 |
-| | P2 영업현금흐름 | OCF > 0 (대리: 영업이익 > 0) |
+| | P2 영업현금흐름 | 영업이익 > 0 |
 | | P3 ROA 개선 | 전년 대비 ROA 증가 |
 | **안전성 (L1~L3)** | L1 부채비율 감소 | 전년 대비 부채비율 하락 |
-| | L2 유동비율 개선 | 전년 대비 유동비율 상승 (대리: 부채비율 하락) |
-| | L3 무상증자 없음 | 신주 미발행 (대리: PBR 범위 정상) |
-| **성장성 (E1~E3)** | E1 매출총이익률 개선 | 전년 대비 영업이익률 상승 |
+| | L2 유동비율 개선 | 부채비율 하락 (대리지표) |
+| | L3 무상증자 없음 | PBR 정상 범위 |
+| **성장성 (E1~E3)** | E1 영업이익률 개선 | 전년 대비 영업이익률 상승 |
 | | E2 자산회전율 개선 | 전년 대비 매출/총자산 증가 |
-| | E3 영업현금흐름 > 순이익 | OCF > 순이익 (대리: 영업이익YoY > 5%) |
+| | E3 OCF > 순이익 | 영업이익YoY > 5% (대리지표) |
 
-> DART에서 전년도 대비 데이터를 확보하지 못한 항목은 0점 처리 (보수적 평가).
+---
+
+### 우량주 스크리닝 파이프라인 (장기 6개월+)
+
+```mermaid
+flowchart TD
+    A["Naver 시가총액 순위 페이지<br/>탐색 범위: 100 / 200 / 300종목"] --> B["사전 필터<br/>ROE > 0 · 시가총액 500억 이상"]
+    B --> C["DART Open API<br/>ROE 2개년 평균 · 영업이익률<br/>영업이익YoY · 부채비율 · 배당수익률<br/>※ 연도 폴백: 전년사업보고서 → 반기"]
+    C --> D["5단계 필터<br/>ROE ≥ roe_min · 영업이익률 ≥ op_margin_min<br/>영업이익YoY ≥ yoy_min · 부채비율 ≤ debt_max<br/>PBR ≤ pbr_max"]
+    D --> E["quality_score<br/>0~100점<br/>ROE(30) + 영업이익률(25)<br/>영업이익YoY(20) + 부채비율(15) + 배당(10)"]
+    E --> F["ROE 2개년 평균<br/>일시적 고ROE 필터링<br/>지속 성장 기업 확인"]
+    F --> G["quality_score 내림차순 정렬<br/>당일 인메모리 캐시"]
+```
 
 ---
 
 ## 📊 점수 체계 해석
 
-### Tech Score (기술적 지표 종합)
+### Tech Score (기술적 지표 종합, 0~100)
 
 | 점수 | 해석 |
 |------|------|
@@ -375,130 +312,110 @@ flowchart TD
 
 **세부 구성 (합계 100점)**
 
-**① 추세 (최대 40점)**
+| 구성 | 최대 | 주요 지표 |
+|------|------|-----------|
+| ① 추세 | 40점 | SMA5/20/60, MACD 골든크로스, ADX DI+/DI− |
+| ② 모멘텀 | 30점 | RSI × MACD 방향 맥락 보정, BB 폭 보정 |
+| ③ 위치·자금흐름 | 30점 | BB 위치(20), CMF(5), 거래량 확인(5) |
 
-| 조건 | SMA60 계산 가능 시 | SMA60 미계산 시 |
-|------|-------------------|----------------|
-| 종가 > SMA20 | +10 | +10 |
-| SMA5 > SMA20 | +10 | +10 |
-| MACD > Signal (골든크로스) | +15 | +20 |
-| 종가 > SMA60 (중기 추세 확인) | +5 | — |
-| ADX DI+ > DI− (추세 방향 확인) | +3 (최대 40 캡) | +3 (최대 40 캡) |
+> MACD 방향에 따라 RSI 최적 구간이 반전됩니다 (상승추세: 55~75 최적 / 하락추세: 35~50 최적).
 
-> SMA60 미계산 시 MACD에 가중치를 흡수하여 기본 합계 40점 유지. ADX 보너스는 40점 초과 불가.
+---
 
-**② 모멘텀 (최대 30점) — MACD 방향별 RSI 구간**
+### ML Score (머신러닝 예측, 0~100)
 
-> MACD > Signal(상승 추세)이면 강한 RSI가 긍정 신호, 하락/중립이면 과매도 반등 구간이 최적.
-
-**상승 추세 (MACD > Signal):**
-
-| RSI 구간 | 점수 | 해석 |
-|----------|------|------|
-| 55–75 | +30 | 핵심 상승 구간 (최적) |
-| 75 초과 | +24 | 강한 과매수 — 모멘텀 강함 |
-| 45–55 | +20 | 추세 초입 |
-| 35–45 | +12 | 추세 약화 경고 |
-| 35 미만 | +6 | 신뢰 저하 |
-
-**하락/중립 추세 (MACD ≤ Signal):**
-
-| RSI 구간 | 점수 | 해석 |
-|----------|------|------|
-| 35–50 | +30 | 과매도 탈출, 반등 준비 (최적) |
-| 30–35 | +24 | 깊은 과매도, 반등 기대 |
-| 30 미만 | +18 | 심한 과매도, 단기 반등 가능 |
-| 50–65 | +14 | 중립~완만한 상승 |
-| 65–75 | +8 | 하락 추세인데 RSI 높음 |
-| 75 초과 | +4 | 과열 경고 |
-
-> BB 폭 보정: 밴드가 매우 좁으면(bb_width < 3%) −3pt, 확장되면(bb_width > 12%) +2pt (최대 30pt 캡).
-
-**③ BB 위치 + CMF + 거래량 (최대 30점)**
-
-BB 위치 (최대 20점) — MACD 방향에 따라 최적 구간 이동:
-
-| BB 위치 | 상승추세 (MACD↑) | 하락/중립 (MACD↓) |
-|---------|-----------------|------------------|
-| 0.4–0.75 | +20 (추세 추종 최적) | +11 |
-| 0.2–0.5 | +11 | +20 (반등 매수 최적) |
-| 0.75–0.9 | +14 | +6 |
-| 0.5–0.7 | — | +14 |
-| 0.1–0.2 | — | +10 |
-| 0.9 초과 | +6 | +2 (밴드 이탈) |
-| 0.2 미만 | +2 (하단 이탈) | — |
-| 0.1 미만 | — | +2 (밴드 이탈) |
-
-CMF 자금흐름 (최대 5점): CMF > 0.05 → +5pt / CMF > 0 → +3pt
-
-거래량 확인 (최대 5점): 당일 거래량 ≥ 20일 평균의 1.5배 → +5pt
-
-### ML Score (머신러닝 예측)
-
-**10거래일 후 수익률 상위 25% 확률**의 캘리브레이션 점수 (0~100).
-이진 분류(top 25% = 1 / bottom 25% = 0)의 예측 확률을 test_proba 분포 기준 백분위로 균등화.
+10거래일 후 수익률 **상위 25% 진입 확률**의 캘리브레이션 점수.
 
 | 점수 | 해석 |
 |------|------|
-| 70–100 | 강한 상승 기대 (상위 25% 진입 고확률) |
+| 70–100 | 강한 상승 기대 (상위 25% 고확률) |
 | 50–69 | 중간 이상 — 양호 |
 | 30–49 | 중립~약세 |
 | 0–29 | 하위권 예상 |
 
-### News Sentiment Score (뉴스 감성)
+---
+
+### News Sentiment Score (뉴스 감성, -100~100)
 
 | 점수 | 해석 |
 |------|------|
 | 51–100 | Very Bullish (매우 긍정) |
 | 1–50 | Bullish (긍정) |
 | 0 | Neutral |
-| -49 – -1 | Bearish (부정) |
-| -100 – -50 | Very Bearish (매우 부정) |
+| -49~-1 | Bearish (부정) |
+| -100~-50 | Very Bearish (매우 부정) |
 
-### Value Score (가치주 스크리닝)
+---
 
-**value_score (0~100)** — 펀더멘털 항목별 가중 점수 합산:
+### Value Score (가치주, 0~100)
 
 | 항목 | 배점 | 최고점 기준 |
 |------|------|------------|
-| PER | 25pt | PER ≤ 5 → 25점, ≤ 10 → 20점, ≤ 15 → 15점, ≤ 25 → 10점 |
-| PBR | 20pt | PBR ≤ 0.5 → 20점, ≤ 1 → 16점, ≤ 2 → 10점, ≤ 3 → 5점 |
-| ROE | 20pt | ROE ≥ 20% → 20점, ≥ 15% → 16점, ≥ 10% → 12점, ≥ 5% → 6점 |
-| 부채비율 | 20pt | ≤ 30% → 20점, ≤ 70% → 16점, ≤ 100% → 12점, ≤ 150% → 8점, ≤ 200% → 4점 |
-| 영업이익YoY | 15pt | ≥ 30% → 15점, ≥ 15% → 12점, ≥ 0% → 9점, ≥ -20% → 4점 |
+| PER | 25pt | 업종 중앙값 기준 상대 평가 |
+| PBR | 15pt | 낮을수록 최고 / 3.0 이상 0pt |
+| ROE | 20pt | ≥ 30% 최고 (2개년 평균) |
+| 부채비율 | 15pt | 낮을수록 최고 / 150% 이상 0pt |
+| 영업이익YoY | 30pt | ≥ +30% 최고 / -30% 이하 0pt |
+| 배당수익률 | 10pt | ≥ 3% 최고 (데이터 없으면 제외) |
 
-> 데이터 미수신 항목은 전체 가용 점수 기준으로 비율 정규화 (데이터가 적을수록 불리하지 않도록).
-
-**복합 정렬**: `value_score × 0.7 + f_score_normalized × 0.3`
-(f_score_normalized = F-Score / 9 × 100)
+**복합 정렬:** `value_score × 0.7 + (F-Score / 9 × 100) × 0.3`
 
 | value_score | 해석 |
 |-------------|------|
 | 70–100 | 우수한 저평가 종목 — 중기 매수 검토 대상 |
 | 50–69 | 양호 — 추가 검증 후 판단 |
 | 30–49 | 보통 — 일부 지표 취약 |
-| 0–29 | 미달 — 필터 통과 기준 재검토 권장 |
+| 0–29 | 미달 |
 
-### Quality Score (우량주 스크리닝)
+---
 
-**quality_score (0~100)** — 수익성·성장성·재무건전성 항목별 가중 점수 합산:
+### Quality Score (우량주, 0~100)
 
 | 항목 | 배점 | 최고점 기준 |
 |------|------|------------|
-| ROE | 30pt | ROE ≥ 25% → 30점, ≥ 20% → 25점, ≥ 15% → 18점, ≥ 12% → 12점 |
-| 영업이익률 | 25pt | ≥ 25% → 25점, ≥ 20% → 20점, ≥ 15% → 14점, ≥ 10% → 8점 |
-| 영업이익YoY | 20pt | ≥ 20% → 20점, ≥ 10% → 16점, ≥ 0% → 10점, ≥ -10% → 4점 |
-| 부채비율 | 15pt | ≤ 30% → 15점, ≤ 50% → 12점, ≤ 70% → 8점, ≤ 100% → 4점 |
-| 배당수익률 | 10pt | ≥ 3% → 10점, ≥ 2% → 7점, ≥ 1% → 4점, ≥ 0% → 2점 |
-
-> ROE 지속성 확인: 2개년 평균 ROE를 계산해 일시적 고ROE를 걸러냅니다.
+| ROE | 30pt | ≥ 20% 최고 (2개년 평균) |
+| 영업이익률 | 25pt | ≥ 20% 최고 |
+| 영업이익YoY | 20pt | ≥ 30% 최고 |
+| 부채비율 | 15pt | 낮을수록 최고 / 100% 이상 0pt |
+| 배당수익률 | 10pt | ≥ 3% 최고 |
 
 | quality_score | 해석 |
 |---------------|------|
 | 70–100 | 최우량 — 장기 핵심 보유 후보 |
 | 50–69 | 양호 — 장기 투자 검토 대상 |
-| 30–49 | 보통 — 일부 지표 취약, 추가 검증 필요 |
-| 0–29 | 미달 — 필터 기준 재검토 권장 |
+| 30–49 | 보통 — 추가 검증 필요 |
+| 0–29 | 미달 |
+
+---
+
+## 🖥 대시보드 메뉴 구성 (8탭)
+
+> **권장 브라우저: Chrome / Firefox (최신 버전)**
+
+```mermaid
+flowchart LR
+    DASH["http://localhost:8000/dashboard"]
+
+    DASH --> T1["① Dashboard<br/>시장지수 · 포트폴리오 요약<br/>날짜별 AI 추천 리포트<br/>추천 지속성 히트맵 🔥🔄📌"]
+    DASH --> T2["② Watchlist<br/>관심 종목 등록·삭제<br/>실시간 심층 분석<br/>분석 이력 타임라인"]
+    DASH --> T3["③ AI 추천<br/>테마·시장별 추천 생성<br/>날짜 선택 히스토리<br/>📊 5·10·20거래일 성과 추적"]
+    DASH --> T4["④ 가치주 추천<br/>PER·PBR·ROE·부채비율·F-Score 필터<br/>value_score 복합 정렬<br/>탐색 범위 100/200/300종목"]
+    DASH --> T5["⑤ 우량주 추천<br/>ROE·영업이익률·YoY·부채비율 필터<br/>quality_score 정렬<br/>ROE 2개년 지속성 확인"]
+    DASH --> T6["⑥ 백테스트<br/>RSI / MACD / COMPOSITE<br/>단순보유 비교 차트<br/>초보자 해석 가이드"]
+    DASH --> T7["⑦ 모델 신뢰도<br/>5모델 AUC · 과적합 갭<br/>드리프트 등급 · 피처 중요도<br/>재학습 권장 여부"]
+    DASH --> T8["⑧ 설정<br/>수동 일일 업데이트 실행<br/>텔레그램·데이터소스 상태 확인"]
+```
+
+| 탭 | 주요 기능 | 투자 관점 |
+|----|----------|-----------|
+| **Dashboard** | 시장지수, AI 추천, 히트맵 | 당일 현황 파악 |
+| **Watchlist** | 관심종목 관리, 분석 이력 | 지속 모니터링 |
+| **AI 추천** | ML 추천 생성, 성과 추적 | 단기 1~2주 |
+| **가치주 추천** | F-Score + value_score 스크리닝 | 중기 3~6개월 |
+| **우량주 추천** | quality_score 스크리닝 | 장기 6개월+ |
+| **백테스트** | 전략별 과거 성과 시뮬레이션 | 전략 검증 |
+| **모델 신뢰도** | ML 모델 헬스체크 | 신호 신뢰성 판단 |
+| **설정** | 수동 실행, 환경 설정 확인 | 운영 관리 |
 
 ---
 
@@ -506,110 +423,79 @@ CMF 자금흐름 (최대 5점): CMF > 0.05 → +5pt / CMF > 0 → +3pt
 
 > ⚠️ 본 시스템은 **투자 보조 도구**입니다. 최종 투자 결정은 반드시 본인이 직접 판단하세요.
 
-### 0. 투자 시계 (Investment Horizon) — **단기, 1~2주**
+### 투자 시계 (Investment Horizon) 선택
 
-본 시스템의 모든 컴포넌트는 **단기(5~15거래일) 트레이딩** 관점에 최적화되어 있습니다.
+```mermaid
+flowchart TD
+    START["투자 목적 선택"] --> S1["단기 트레이딩<br/>1~2주"]
+    START --> S2["중기 투자<br/>3~6개월"]
+    START --> S3["장기 투자<br/>6개월+"]
 
-| 컴포넌트 | 시간 지평 | 근거 |
-|----------|-----------|------|
-| ML 모델 (ml_score) | **10거래일** (≈ 2주) | 타깃 = 10거래일 후 수익률 상위 25% |
-| 기술적 지표 (tech_score) | **5~60일** | SMA5·20·MACD(12/26)·RSI(14)·BB(20) 중심 |
-| 후보군 선정 (버킷) | **당일** | 당일 거래량 상위·등락률 기준 분류 |
-| 뉴스 감성 (sentiment) | **당일~수일** | 최신순 뉴스, 7일 전 가중치 0.09로 급감 |
-| **가치주 스크리닝** | **3~6개월** | DART 연간 재무제표 기반 펀더멘털 (PER·PBR·ROE·부채비율) + F-Score |
-| **우량주 스크리닝** | **6개월+** | DART 기반 ROE 2개년·영업이익률·YoY성장·부채비율 — 장기 수익성 우량 기업 |
+    S1 --> A1["AI 추천 탭 사용<br/>tech_score + ml_score + sentiment<br/>종합 점수 65+ · BUY 신호 우선"]
+    S2 --> A2["가치주 추천 탭 사용<br/>value_score 60+ · F-Score 6+<br/>PER ≤ 15 · ROE ≥ 10%"]
+    S3 --> A3["우량주 추천 탭 사용<br/>quality_score 70+<br/>ROE 2개년 ≥ 15% · 영업이익률 ≥ 15%"]
 
-> **1~3개월 이상 보유 시 AI 추천(단기) 신호는 의미를 잃습니다.**
-> 중기 보유 목적이라면 AI 추천 대신 **가치주 스크리닝(가치주 추천 탭)** 을 활용하세요.
-> 추천 후 **1~2주 내 진입·관찰·청산** 사이클을 전제로 설계되었습니다.
-> SMA120(6개월) 같은 장기 지표는 계산되지만 점수·ML 피처에 미반영됩니다.
+    A1 & A2 & A3 --> CHECK["두 신호 이상 일치 시<br/>최우선 검토 대상"]
+```
 
-### 1. 신호 해석 기준
+### 단기 AI 추천 활용 단계별 가이드
+
+```
+Step 1 — 스크리닝 (매일 자동)
+  → 텔레그램 알림으로 오늘의 추천 9종목 확인
+  → 종합 점수 상위 2~3종목을 후보로 선정
+
+Step 2 — 지속성 확인 (신뢰도 검증)
+  → 추천 지속성 히트맵에서 연속 추천 일수 확인
+  → 🔥 (연속 2일+) 배지 종목은 신호 신뢰도 높음
+
+Step 3 — 성과 데이터 확인
+  → AI 추천 탭 → "추천 성과 추적" 섹션
+  → 과거 추천의 5·10·20거래일 승률 · 목표가 달성률 확인
+
+Step 4 — 심층 검증 (수동)
+  → Dashboard 또는 AI 추천 탭 상세 리포트 확인
+  → 강점/약점, 뉴스 원문 링크, 목표가 근거 직접 검토
+  → 백테스트 탭에서 해당 전략의 과거 성과 확인
+
+Step 5 — 최종 판단 기준
+  아래 조건 중 2개 이상 충족 시 매수 검토 ✅
+  ✓ 최근 5일 거래량 ≥ 20일 평균의 150%
+  ✓ 52주 저점 대비 -20% 이내
+  ✓ 뉴스 감성 Bullish 이상 (score > 20)
+  ✓ 추천 지속성 히트맵 🔥 배지 (연속 2일+)
+  ✓ ML Score ≥ 60 + Tech Score ≥ 65
+```
+
+### 강력 매수 후보 판단 기준
 
 ```
 강력 매수 후보 (모든 조건 충족 시)
-  ✅ Tech Score >= 65
-  ✅ ML Score >= 60
+  ✅ Tech Score ≥ 65
+  ✅ ML Score ≥ 60
   ✅ News Score > 20
   ✅ AI action = BUY
-  ✅ RSI: 35–50 구간 (과매도 탈출 또는 중립 하단)
+  ✅ RSI: 35~50 구간 (과매도 탈출 또는 중립 하단)
   ✅ MACD: 골든크로스 발생 또는 유지
 
 관망 권고
-  - Tech < 50 이고 MACD 데드크로스 상태
-  - News Score < -30 (강한 악재 뉴스)
-  - RSI > 75 (과열 구간)
+  ✗ Tech < 50 이고 MACD 데드크로스 상태
+  ✗ News Score < -30 (강한 악재 뉴스)
+  ✗ RSI > 75 (과열 구간)
 
 매도 검토
-  - AI action = SELL + Tech Score < 40
-  - RSI > 75 + MACD 데드크로스 동시 발생
+  ✗ AI action = SELL + Tech Score < 40
+  ✗ RSI > 75 + MACD 데드크로스 동시 발생
 ```
 
-### 2. 단계별 활용 방법
-
-**Step 1 — 스크리닝 (매일 자동)**
-- 텔레그램 알림으로 오늘의 추천 9종목 확인
-- 종합 점수 상위 2–3종목을 후보로 선정
-
-**Step 2 — 지속성 확인**
-- AI Recommendations → 📅 추천 지속성 히트맵에서 연속 추천 일수 확인
-- 2일+ 연속 추천 종목(🔥 배지)은 신호 신뢰도가 높음
-
-**Step 3 — 심층 검증 (수동)**
-- Dashboard 또는 AI Recommendations에서 상세 리포트 확인
-- 강점/약점, 뉴스 근거 및 원문 링크, 목표가 근거 직접 검토
-- Backtest Viewer에서 해당 종목의 전략별 과거 성과 확인
-
-**[중기 보유 목적] Step 2.5 — 가치주 스크리닝 활용**
-- 가치주 추천 탭에서 PER·PBR·ROE·부채비율 필터를 조정해 후보군 설정
-- value_score + F-Score 복합 정렬 결과 상위 종목을 중기 매수 후보로 검토
-- F-Score 6점 이상 + value_score 60 이상 종목은 펀더멘털 안정성이 높음
-- 가치주 신호는 단기 AI 추천과 독립적 — 두 신호가 일치하는 종목 우선 검토
-
-**[장기 보유 목적] Step 2.6 — 우량주 스크리닝 활용**
-- 우량주 추천 탭에서 ROE·영업이익률·부채비율 필터를 조정해 후보군 설정
-- quality_score 상위 종목은 ROE 2개년 평균·영업이익률·YoY성장·재무건전성이 복합적으로 우수
-- ROE ≥ 15% + 영업이익률 ≥ 15% + quality_score 70+ 종목은 장기 핵심 보유 후보
-- 우량주 신호는 가치주·단기 AI 추천과 독립적 — 모든 신호가 겹치는 종목을 최우선 검토
-
-**Step 4 — 최종 판단 기준**
-```
-AI 추천만으로 매수 ❌
-AI 추천 + 아래 조건 중 2개 이상 충족 시 매수 검토 ✅
-  - 최근 5일 거래량이 20일 평균 대비 150% 이상
-  - 52주 저점 대비 -20% 이내 (저점 매수 구간)
-  - 섹터 전반적 상승 분위기
-  - 뉴스 감성 Bullish 이상
-  - 추천 지속성 히트맵에서 2일+ 연속 추천
-```
-
-### 3. 리스크 관리
+### 리스크 관리 원칙
 
 | 원칙 | 설명 |
 |------|------|
-| **분산 투자** | 추천 9종목 중 동일 섹터에 몰리지 않도록 1–2종목만 선택 |
-| **손절 기준** | 매수가 대비 7–8% 하락 시 손절 고려 (시스템은 손절선 미제공) |
-| **목표가 활용** | 목표가는 단기 참고값이며 보장 수치가 아님. 실현 후 일부 익절 전략 권장 |
-| **비중 관리** | 단일 종목에 총 자산의 10% 이상 집중 투자 지양 |
-| **재검증** | 매수 후 3–5일 내 시스템 재분석으로 의견 변화 모니터링 |
-
-### 4. 점수별 권장 포지션 크기
-
-```
-종합 점수 75 이상 + BUY → 일반 비중 (예: 5–7%)
-종합 점수 65–74 + BUY   → 소규모 진입 (예: 3–5%)
-종합 점수 55–64 + BUY   → 관망 또는 최소 비중 (예: 1–2%)
-종합 점수 55 미만        → 매수 보류
-```
-
-### 5. 활용 시 주의사항
-
-- **단기(1~2주) 신호** — ML 타깃이 10거래일이므로 수개월 보유 목적의 종목 선택에는 부적합
-- **뉴스 감성은 당일 헤드라인 기반** — 호재성 기사 뒤 실적 부진 가능
-- **ML 모델 미탑재 시 tech_score 대체** — 로그 메시지로 확인 가능
-- **ML 점수는 절대 수익률이 아닌 상대강도 순위** — 시장 전체가 하락장이면 점수 높아도 손실 가능
-- **자동화는 평일 16:30 KST 실행** — 당일 주가 반영, 다음날 매매 판단에 활용
-- **빠른 시장 변동 반영 불가** — 급등락 당일은 직접 현재 가격 확인 필수
+| **분산 투자** | 동일 섹터에 몰리지 않도록 1~2종목만 선택 |
+| **손절 기준** | 매수가 대비 7~8% 하락 시 손절 고려 |
+| **비중 관리** | 단일 종목에 총 자산의 10% 이상 집중 지양 |
+| **재검증** | 매수 후 3~5일 내 재분석으로 의견 변화 모니터링 |
 
 ---
 
@@ -619,48 +505,13 @@ AI 추천 + 아래 조건 중 2개 이상 충족 시 매수 검토 ✅
 
 분석 실행 없이 GitHub Actions가 생성한 추천 결과를 대시보드로 조회할 때 사용합니다.
 
-#### 사전 요구 사항 — 시스템 라이브러리
-
 ```bash
-# Ubuntu / Debian
-sudo apt-get install -y libomp-dev
+# 시스템 라이브러리 (XGBoost / LightGBM 구동에 필요)
+sudo apt-get install -y libomp-dev   # Ubuntu / Debian
+# brew install libomp               # macOS
 
-# macOS
-brew install libomp
-
-# Windows — 별도 설치 불필요
-```
-
-#### pip로 설치
-
-```bash
 pip install koreanstocks
 ```
-
-> 가상 환경(`venv`, `conda`) 내에서 설치할 것을 권장합니다. 시스템 Python에 직접 설치하면 다른 패키지와 의존성이 충돌할 수 있습니다.
-
-#### pipx로 설치 (CLI 툴 격리 권장)
-
-[pipx](https://pipx.pypa.io)는 CLI 도구를 독립된 가상 환경에 설치하여 시스템 Python을 오염시키지 않습니다.
-
-```bash
-# pipx 설치 (미설치 시)
-pip install pipx
-pipx ensurepath          # PATH 자동 등록 (셸 재시작 필요)
-
-# koreanstocks 설치
-pipx install koreanstocks
-```
-
-| 항목 | pip | pipx |
-|------|-----|------|
-| 설치 환경 | 현재 활성 Python 환경 | 자동 생성된 독립 venv |
-| 시스템 Python 오염 | 가능 | 없음 |
-| CLI 자동 PATH 등록 | 환경에 따라 다름 | 항상 자동 등록 |
-| 패키지 업그레이드 | `pip install -U koreanstocks` | `pipx upgrade koreanstocks` |
-| 패키지 제거 | `pip uninstall koreanstocks` | `pipx uninstall koreanstocks` |
-
-#### 설치 후 빠른 시작
 
 ```bash
 koreanstocks init    # API 키 대화형 설정
@@ -669,163 +520,55 @@ koreanstocks serve   # http://localhost:8000/dashboard 자동 열림
 ```
 
 > `.env`·DB·ML 모델은 `~/.koreanstocks/`에 저장됩니다.
-> 매일 장 마감 후 `koreanstocks sync --force`로 최신 추천 결과를 받아오세요.
+
+#### pipx로 설치 (CLI 격리 권장)
+
+```bash
+pip install pipx && pipx ensurepath
+pipx install koreanstocks
+```
 
 ---
 
 ### 방법 B — 저장소 클론 (개발 / 자체 분석 실행)
 
-GitHub Actions 없이 로컬에서 직접 분석을 실행하거나 코드를 수정할 때 사용합니다.
-
-#### 1. 저장소 클론
-
 ```bash
 git clone https://github.com/bullpeng72/KoreanStock.git
 cd KoreanStock
-```
 
-#### 2. Python 환경 설정 (Python 3.11 ~ 3.13)
-
-```bash
-conda create -n stocks_env python=3.11   # 또는 3.12, 3.13
+conda create -n stocks_env python=3.11
 conda activate stocks_env
-```
 
-#### 3. 패키지 설치
-
-```bash
-# XGBoost 구동에 필요한 시스템 라이브러리
-sudo apt-get install -y libomp-dev          # Ubuntu/Debian
-# brew install libomp                       # macOS
-
-pip install -e .    # editable 설치 — 코드 수정이 즉시 반영됨
+sudo apt-get install -y libomp-dev   # Ubuntu/Debian
+pip install -e .                     # editable 설치
 ```
 
 ---
 
 ### API 키 설정 — `koreanstocks init`
 
-방법 A·B 공통. 설치 후 반드시 실행해야 합니다.
-
-#### 대화형 설정 (권장)
-
 ```bash
-koreanstocks init
+koreanstocks init                   # 대화형 입력 (권장)
+koreanstocks init --non-interactive  # 빈 템플릿 생성 (CI용)
 ```
 
-실행 시 아래와 같이 단계별로 입력을 요청합니다 (Enter = 나중에 입력):
-
-```
-생성 위치: ~/.koreanstocks/.env
-
-[필수] API 키를 입력하세요 (Enter = 나중에 입력):
-
-  OpenAI API Key [https://platform.openai.com/api-keys]: sk-proj-...
-  Naver Client ID [https://developers.naver.com/apps]: abc123
-  Naver Client Secret: xyz789
-  Telegram Bot Token [@BotFather → /newbot]: 123456:ABC-...
-  Telegram Chat ID [getUpdates 로 확인]: -1001234567890
-
-[선택] 미입력 시 건너뜁니다:
-
-  DART API Key (선택) [https://opendart.fss.or.kr]:
-
-.env 파일을 생성했습니다.
-  경로: ~/.koreanstocks/.env
-
-다음 단계:
-  koreanstocks sync    # 최신 분석 DB 다운로드
-  koreanstocks serve   # 웹 대시보드 실행
-```
-
-#### 비대화형 설정 (CI·자동화용)
-
-```bash
-koreanstocks init --non-interactive   # 빈 템플릿 생성 후 직접 편집
-```
-
-#### .env 파일 경로 확인 및 편집
-
-```bash
-koreanstocks home                        # 홈 디렉토리 경로 출력
-cd $(koreanstocks home)                  # 홈 디렉토리로 이동
-${EDITOR:-nano} $(koreanstocks home)/.env  # .env 직접 편집
-
-koreanstocks home --open                 # 파일 탐색기로 열기
-koreanstocks home --setup                # 셸 alias 등록 안내 출력
-```
-
-`koreanstocks home --setup` 출력 예시 (`.bashrc` / `.zshrc`에 추가):
-
-```bash
-alias kshome='cd "$(koreanstocks home)"'          # 홈 디렉토리로 이동
-alias ksenv='${EDITOR:-nano} "$(koreanstocks home)/.env"'  # .env 편집
-```
-
-`.env` 생성 위치는 설치 방법에 따라 자동 결정됩니다:
-
-| 설치 방법 | `.env` 저장 경로 |
-|-----------|----------------|
-| `pip install koreanstocks` / `pipx install koreanstocks` | `~/.koreanstocks/.env` |
-| `pip install -e .` (editable, 방법 B) | `(프로젝트 루트)/.env` |
-
-#### API 키 발급 가이드
-
-**① OpenAI API Key** (필수) — GPT-4o-mini 뉴스 감성 분석·AI 의견 생성
-
-1. [platform.openai.com](https://platform.openai.com) 로그인
-2. 우측 상단 프로필 → **API keys** → **Create new secret key**
-3. 키 이름 입력 후 생성 — `sk-proj-...` 형식의 키를 복사
-4. ⚠️ 키는 생성 직후에만 전체 확인 가능하므로 즉시 복사하세요.
-
-**② Naver 검색 API** (필수) — 종목명 기반 최신 뉴스 수집
-
-1. [developers.naver.com/apps](https://developers.naver.com/apps) 로그인
-2. **Application 등록** 클릭
-3. 애플리케이션 이름 입력 (예: `KoreanStocks`)
-4. **사용 API** → **검색** 선택
-5. 등록 후 **Client ID**와 **Client Secret** 복사
-
-**③ Telegram Bot Token & Chat ID** (필수) — 일일 추천 리포트 수신
-
-```
-Bot Token 발급:
-1. 텔레그램에서 @BotFather 검색 후 시작
-2. /newbot 입력 → 봇 이름 및 사용자명 입력
-3. 발급된 토큰 복사 (예: 123456789:ABC-defGHI...)
-
-Chat ID 확인:
-1. 발급한 봇에게 임의 메시지 전송
-2. 브라우저에서 아래 URL 접속 (TOKEN을 실제 토큰으로 교체):
-   https://api.telegram.org/bot<TOKEN>/getUpdates
-3. 응답 JSON에서 "chat" → "id" 값 복사
-   (그룹 채팅의 경우 음수 값: 예 -1001234567890)
-```
-
-**④ DART API Key** (선택) — 금융감독원 공시 수집으로 감성 분석 품질 향상
-
-1. [opendart.fss.or.kr](https://opendart.fss.or.kr) 회원가입
-2. **개발자 센터** → **API 신청** (무료, 즉시 발급)
-3. 발급된 API 키 복사
-4. 미설정 시에도 뉴스만으로 감성 분석이 동작합니다.
-
-#### 환경 변수 전체 목록
+#### 환경 변수 목록
 
 ```ini
 # ── 필수 ──────────────────────────────────────────────────────
-OPENAI_API_KEY=sk-proj-...
-NAVER_CLIENT_ID=abc123
+OPENAI_API_KEY=sk-proj-...         # GPT-4o-mini 뉴스 감성·AI 의견
+NAVER_CLIENT_ID=abc123             # Naver News API
 NAVER_CLIENT_SECRET=xyz789
-TELEGRAM_BOT_TOKEN=123456789:ABC-...
+TELEGRAM_BOT_TOKEN=123456:ABC-...  # 추천 리포트 발송
 TELEGRAM_CHAT_ID=-1001234567890
 
 # ── 선택 ──────────────────────────────────────────────────────
-DART_API_KEY=                        # 미설정 시 뉴스만으로 감성 분석
+DART_API_KEY=                      # 미설정 시 뉴스만으로 감성 분석
 
-# ── 시스템 (기본값 그대로 사용 권장) ───────────────────────────
+# ── 시스템 (기본값 사용 권장) ──────────────────────────────────
 DB_PATH=data/storage/stock_analysis.db
-# KOREANSTOCKS_BASE_DIR=             # 데이터 루트 경로 강제 지정 시에만 사용
-# KOREANSTOCKS_GITHUB_DB_URL=        # 저장소 fork 시 sync URL 재정의
+# KOREANSTOCKS_BASE_DIR=           # 데이터 루트 경로 강제 지정
+# KOREANSTOCKS_GITHUB_DB_URL=      # fork 시 sync URL 재정의
 ```
 
 | 변수 | 발급처 | 필수 |
@@ -835,65 +578,83 @@ DB_PATH=data/storage/stock_analysis.db
 | `TELEGRAM_BOT_TOKEN` | 텔레그램 [@BotFather](https://t.me/BotFather) → `/newbot` | ✅ |
 | `TELEGRAM_CHAT_ID` | `api.telegram.org/bot<TOKEN>/getUpdates` | ✅ |
 | `DART_API_KEY` | [opendart.fss.or.kr](https://opendart.fss.or.kr) (무료) | ☑️ |
-| `KOREANSTOCKS_GITHUB_DB_URL` | 저장소 fork 시 `koreanstocks sync` 대상 URL 재정의 | ☑️ |
 
 ---
 
-### ML 모델 학습 (방법 B / 최초 1회)
+### 주요 CLI 명령어
 
 ```bash
+# 웹 대시보드
+koreanstocks serve                     # http://localhost:8000/dashboard
+koreanstocks serve --port 8080         # 포트 변경
+koreanstocks serve --no-browser        # 브라우저 자동 실행 비활성화
+
+# 일일 추천 분석 (GitHub Actions용)
+koreanstocks recommend
+koreanstocks recommend --market KOSPI --limit 10
+
+# 단일 종목 심층 분석
+koreanstocks analyze 005930
+
+# ML 모델 재학습
 koreanstocks train
-# 또는
-python train_models.py
+koreanstocks train --period 3 --future-days 10
+
+# DB 동기화 (PyPI 설치 환경)
+koreanstocks sync              # 최초 수신 또는 날짜 갱신
+koreanstocks sync --force      # 강제 덮어쓰기
+
+# 추천 성과 추적
+koreanstocks outcomes                  # 미검증 결과 업데이트 + 통계 출력
+koreanstocks outcomes --days 180       # 최근 180일 조회
+koreanstocks outcomes --no-record      # DB 업데이트 없이 통계만
+
+# 가치주 스크리닝 (중기 3~6개월)
+koreanstocks value                     # 기본 필터 (상위 20종목)
+koreanstocks value --per-max 15 --roe-min 10
+koreanstocks value --f-score-min 6 --candidate-limit 300
+
+# 우량주 스크리닝 (장기 6개월+)
+koreanstocks quality                   # 기본 필터 (상위 20종목)
+koreanstocks quality --roe-min 15 --margin-min 15
+koreanstocks quality --market KOSPI --candidate-limit 200
+
+# 데이터 홈 디렉토리
+koreanstocks home                      # 경로 출력
+koreanstocks home --open               # 파일 탐색기로 열기
+koreanstocks home --setup              # 셸 alias 스니펫 출력
+
+# 테스트
+pytest tests/
+python tests/compat_check.py          # Python 3.11~3.13 호환성 검증
 ```
 
-### 추천 성과 추적
+---
 
-```bash
-koreanstocks outcomes          # 미검증 추천 결과 업데이트 + 통계 출력
-koreanstocks outcomes --days 180  # 최근 180일 성과 조회
-koreanstocks outcomes --no-record  # DB 업데이트 없이 통계만 출력
-```
+## 📡 API 엔드포인트
 
-### 가치주 스크리닝
+서버 실행 후 `/docs`에서 Swagger UI로 전체 API 문서를 확인할 수 있습니다.
 
-```bash
-koreanstocks value                            # 기본 조건으로 가치주 스크리닝 (상위 10종목)
-koreanstocks value --limit 20                 # 결과 20종목 출력
-koreanstocks value --per-max 15 --roe-min 10  # PER ≤ 15, ROE ≥ 10% 조건 적용
-koreanstocks value --f-score-min 6            # Piotroski F-Score 6점 이상만 포함
-koreanstocks value --candidate-limit 300      # 탐색 범위 300종목으로 확대 (소요 시간 증가)
-```
-
-> DART API Key(`DART_API_KEY`)가 `.env`에 설정된 경우 펀더멘털 수집 정확도가 향상됩니다.
-> 당일 동일 조건 재실행 시 인메모리 캐시로 즉시 반환됩니다.
-
-### 우량주 스크리닝
-
-```bash
-koreanstocks quality                                  # 기본 조건으로 우량주 스크리닝 (상위 20종목)
-koreanstocks quality --limit 30                       # 결과 30종목 출력
-koreanstocks quality --roe-min 15 --margin-min 15     # ROE ≥ 15%, 영업이익률 ≥ 15% 조건 적용
-koreanstocks quality --debt-max 80                    # 부채비율 ≤ 80% 조건 적용
-koreanstocks quality --market KOSPI --candidate-limit 200  # KOSPI 200종목 탐색
-```
-
-> 우량주는 장기(6개월+) 보유 관점 — 단기 AI 추천과 목적이 다릅니다.
-> 당일 동일 조건 재실행 시 인메모리 캐시로 즉시 반환됩니다.
-
-### 앱 실행
-
-```bash
-koreanstocks serve
-```
-
-브라우저가 자동으로 열리며 `http://localhost:8000/dashboard` 접속
-- `/` — Reveal.js 일일 브리핑 슬라이드
-- `/dashboard` — 인터랙티브 대시보드 (8탭)
-- `/docs` — FastAPI Swagger UI
-
-> **권장 브라우저: Chrome / Firefox (최신 버전)**
-> 대시보드의 모든 기능은 Chrome 및 Firefox 최신 버전에서 정상 동작합니다.
+| 라우터 | 엔드포인트 | 메서드 | 설명 |
+|--------|-----------|--------|------|
+| **market** | `/api/market` | GET | 시장 지수 (KS11/KQ11) |
+| | `/api/market/trading-day` | GET | 거래일 여부 확인 |
+| | `/api/market/ranking` | GET | 시장 등락 순위 |
+| **recommendations** | `/api/recommendations` | GET | 날짜별 추천 목록 |
+| | `/api/recommendations/run` | POST | 추천 분석 실행 |
+| | `/api/recommendations/history` | GET | 30일 히스토리 |
+| | `/api/recommendations/outcomes` | GET | 성과 추적 통계 |
+| **analysis** | `/api/analysis/{code}` | GET/POST | 종목 심층 분석 |
+| | `/api/analysis/{code}/history` | GET | 분석 이력 타임라인 |
+| **watchlist** | `/api/watchlist` | GET/POST | 관심 종목 조회/등록 |
+| | `/api/watchlist/{code}` | DELETE | 관심 종목 삭제 |
+| **backtest** | `/api/backtest` | GET | 전략 백테스팅 |
+| **value** | `/api/value_stocks` | GET | 가치주 스크리닝 결과 |
+| | `/api/value_stocks/filters` | GET | 필터 기본값 |
+| **quality** | `/api/quality_stocks` | GET | 우량주 스크리닝 결과 |
+| | `/api/quality_stocks/filters` | GET | 필터 기본값 |
+| **models** | `/api/model_health` | GET | ML 모델 헬스체크 |
+| **version** | `/api/version` | GET | API 버전 정보 |
 
 ---
 
@@ -901,104 +662,153 @@ koreanstocks serve
 
 **실행 시점:** 평일 오후 16:30 KST (UTC 07:30) — 장 마감 후 자동 실행
 
-**설정 방법:**
-1. 저장소를 GitHub에 푸시
-2. `Settings > Secrets and variables > Actions`에서 아래 5개 Secret 등록
+```mermaid
+flowchart TD
+    TRIGGER["⏰ 16:30 KST 평일 자동 실행<br/>(또는 수동 workflow_dispatch)"]
+    TRIGGER --> TRADING{"한국 증시 거래일?"}
+
+    TRADING -- 휴장 --> SKIP["📅 텔레그램 휴장일 알림"]
+
+    TRADING -- 거래일 --> OUTCOME["지난 추천 성과 기록<br/>5·10·20거래일 후 수익률 집계<br/>→ 텔레그램 성과 리포트"]
+    OUTCOME --> STOCKLIST["KOSPI + KOSDAQ 전체 종목 갱신"]
+    STOCKLIST --> BUCKETS["버킷 기반 후보군 선정<br/>거래량 상위 / 상승 모멘텀 / 반등 후보"]
+    BUCKETS --> ANALYSIS["심층 분석 (병렬)<br/>기술 + ML + 뉴스 + GPT"]
+    ANALYSIS --> SELECT["종합 점수 상위 9종목 선정<br/>버킷 쿼터 + 섹터 다양성"]
+    SELECT --> SAVE[("SQLite DB 저장")]
+    SAVE --> ARTIFACT["GitHub Artifact 백업 (90일)"]
+    SAVE --> COMMIT["저장소에 DB 커밋·푸시"]
+    COMMIT --> NOTIFY["📱 텔레그램 추천 리포트"]
+
+    COMMIT --> SYNC1["git clone 환경 → git pull"]
+    COMMIT --> SYNC2["PyPI 설치 → koreanstocks sync"]
+```
+
+**GitHub Secrets 등록 (Settings > Secrets and variables > Actions):**
 
 ```
 OPENAI_API_KEY
 TELEGRAM_BOT_TOKEN
 TELEGRAM_CHAT_ID
-NAVER_CLIENT_ID      (없으면 뉴스 감성 분석 스킵)
+NAVER_CLIENT_ID
 NAVER_CLIENT_SECRET
-```
-
-3. `Actions` 탭에서 워크플로우 활성화 확인
-4. 수동 실행: `Actions > Daily Stock Analysis > Run workflow`
-
-### 자동화 흐름
-
-```mermaid
-flowchart TD
-    TRIGGER["⏰ 16:30 KST<br/>평일 자동 실행<br/>(또는 수동 workflow_dispatch)"]
-    TRIGGER --> TRADING{"한국 증시<br/>거래일?"}
-
-    TRADING -- 휴장 --> SKIP["📅 텔레그램 휴장일 알림"]
-
-    TRADING -- 거래일 --> OUTCOME["지난 추천 성과 기록<br/>5·10·20거래일 후 수익률 집계<br/>→ 텔레그램 성과 리포트"]
-    OUTCOME --> STOCKLIST["KOSPI + KOSDAQ<br/>전체 종목 리스트 갱신"]
-    STOCKLIST --> BUCKETS["버킷 기반 후보군 선정<br/>거래량 상위 / 상승 모멘텀 / 반등 후보"]
-    BUCKETS --> ANALYSIS["심층 분석 (병렬)<br/>기술 + ML + 뉴스 + GPT"]
-    ANALYSIS --> SELECT["종합 점수 상위 9종목 선정<br/>버킷 쿼터 + 섹터 다양성"]
-    SELECT --> SAVE[("SQLite DB<br/>날짜별 저장")]
-    SAVE --> ARTIFACT["GitHub Artifact 백업<br/>(90일 보존)"]
-    SAVE --> COMMIT["저장소에 DB<br/>커밋·푸시"]
-    COMMIT --> NOTIFY["📱 텔레그램<br/>추천 리포트 발송"]
-
-    COMMIT --> SYNC1["git clone 환경<br/>git pull"]
-    COMMIT --> SYNC2["PyPI 설치 환경<br/>koreanstocks sync --force"]
+DART_API_KEY          (선택)
 ```
 
 ---
 
-## 📱 메뉴 구성
+## 📁 프로젝트 구조
 
-> **권장 브라우저: Chrome / Firefox (최신 버전)**
-
-| 탭 | URL | 주요 기능 |
-|----|-----|----------|
-| **Dashboard** | `/dashboard` | 시장 지수, Portfolio 요약, 날짜별 AI 추천 리포트, 추천 지속성 히트맵 |
-| **Watchlist** | `/dashboard#watchlist` | 관심 종목 등록/삭제, 실시간 심층 분석, 분석 이력 타임라인 |
-| **AI 추천** | `/dashboard#recommendations` | 테마·시장별 추천 생성, 날짜 선택 히스토리, 추천 지속성 히트맵, 📊 추천 성과 추적 (5·10·20거래일 승률·목표가 달성률) |
-| **가치주 추천** | `/dashboard#value` | PER·PBR·ROE·부채비율·F-Score 필터 기반 중기(3~6개월) 가치주 스크리닝, 초보자 지표 가이드, 탐색 범위(100/200/300종목) 설정 |
-| **우량주 추천** | `/dashboard#quality` | ROE·영업이익률·YoY성장·부채비율·PBR 필터 기반 장기(6개월+) 우량주 스크리닝, quality_score 정렬, ROE 2개년 지속성 확인 |
-| **백테스트** | `/dashboard#backtest` | RSI/MACD/COMPOSITE 전략 시뮬레이션, B&H 비교 차트, 초보자 해석 가이드 |
-| **모델 신뢰도** | `/dashboard#model` | ML 모델 AUC·과적합 갭·드리프트 등급·피처 중요도·재학습 권장 여부 확인 |
-| **설정** | `/dashboard#settings` | 수동 자동화 실행, 텔레그램 설정 상태 확인 |
-| **브리핑** | `/` | Reveal.js 일일 슬라이드 (종목별 점수·뉴스·AI 의견) |
-| **API 문서** | `/docs` | FastAPI Swagger UI |
+```
+KoreanStocks/
+├── pyproject.toml                       # pip 빌드 설정 (koreanstocks CLI 진입점)
+├── requirements.txt                     # 개발/테스트 전용 (pytest 등)
+├── train_models.py                      # ML 모델 재학습 스크립트
+├── src/
+│   └── koreanstocks/
+│       ├── __init__.py                  # VERSION = "0.4.2"
+│       ├── cli.py                       # Typer CLI (10개 명령어)
+│       ├── api/
+│       │   ├── app.py                   # FastAPI 앱 팩토리
+│       │   ├── dependencies.py          # 공통 의존성
+│       │   └── routers/
+│       │       ├── recommendations.py   # AI 추천 · 성과 추적
+│       │       ├── analysis.py          # 종목 심층 분석
+│       │       ├── watchlist.py         # 관심 종목 CRUD
+│       │       ├── backtest.py          # 전략 백테스팅
+│       │       ├── market.py            # 시장 지수 · 거래일
+│       │       ├── models.py            # ML 모델 헬스체크
+│       │       ├── value.py             # 가치주 스크리닝
+│       │       └── quality.py           # 우량주 스크리닝
+│       ├── static/
+│       │   ├── index.html               # Reveal.js 일일 브리핑 슬라이드
+│       │   ├── dashboard.html           # 인터랙티브 대시보드 (8탭)
+│       │   ├── js/
+│       │   │   ├── slides.js
+│       │   │   └── dashboard.js
+│       │   └── css/theme.css
+│       └── core/
+│           ├── config.py                # 환경변수 및 설정 (dotenv)
+│           ├── constants.py             # 버킷 상수 등 공유 상수
+│           ├── data/
+│           │   ├── provider.py              # 주가 · 종목목록 수집
+│           │   ├── fundamental_provider.py  # DART 펀더멘털 수집
+│           │   └── database.py              # SQLite CRUD
+│           ├── engine/
+│           │   ├── indicators.py            # 기술적 지표 계산
+│           │   ├── features.py              # ML 피처 추출 (20개, 공유)
+│           │   ├── strategy.py              # 전략별 시그널 생성
+│           │   ├── prediction_model.py      # 5-모델 앙상블 추론
+│           │   ├── news_agent.py            # 뉴스 수집 + GPT 감성
+│           │   ├── analysis_agent.py        # 종목 심층 분석 오케스트레이터
+│           │   ├── recommendation_agent.py  # 버킷 기반 추천 생성
+│           │   ├── value_screener.py        # 가치주 스크리닝 (F-Score + value_score)
+│           │   ├── quality_screener.py      # 우량주 스크리닝 (quality_score)
+│           │   ├── trainer.py               # ML 모델 재학습 워크플로우
+│           │   └── scheduler.py             # 자동화 워크플로우
+│           └── utils/
+│               ├── backtester.py        # 전략 성과 검증
+│               ├── notifier.py          # 텔레그램 리포트
+│               └── outcome_tracker.py   # 추천 결과 성과 추적
+├── models/saved/                        # 학습된 ML 모델 (.pkl) · 파라미터 (.json)
+├── data/storage/                        # SQLite DB 파일
+├── docs/
+│   ├── ML_ANALYSIS.md                   # ML 앙상블 시스템 기술 문서
+│   ├── TECHNICAL_ANALYSIS.md            # 기술적 분석 시스템 기술 문서
+│   ├── NEWS_ANALYSIS.md                 # 뉴스 감성 분석 시스템 기술 문서
+│   ├── VALUE_SCREENING.md               # 가치주 스크리닝 기술 문서
+│   └── QUALITY_SCREENING.md             # 우량주 스크리닝 기술 문서
+├── tests/
+│   ├── test_backtester.py               # 백테스터 단위 테스트
+│   └── compat_check.py                  # Python 3.11~3.13 호환성 검증
+└── .github/workflows/
+    └── daily_analysis.yml               # GitHub Actions 스케줄러
+```
 
 ---
 
 ## 📝 변경 이력
 
-### v0.4.1 (2026-03-10) — 우량주 스크리너 추가 · ML 피처 개선 · 대시보드 히트맵 개선
+### v0.4.2 (2026-03-10) — 경고 전면 제거 · 추천 성과 추적 안정성 강화 · 코드 품질 개선
 
-- ✨ `우량주 추천` 탭 신설 (대시보드 5번째 탭) — ROE·영업이익률·YoY성장·부채비율·PBR 필터 + 우량점수 정렬
-- ✨ `koreanstocks quality` CLI 명령어 신설 — 우량주 스크리닝 터미널 직접 실행
-- ✨ `GET /api/quality_stocks` 엔드포인트 신설 — quality_score 내림차순 정렬
-- ✨ 추천 지속성 히트맵 개선 — 연속 추천(🔥)과 비연속 반복 추천(🔄/📌) 구분 배지
-- 🔧 ML 피처 3개 추가: `obv_trend`, `rsi`, `cci_pct` (17→20개), `vix_change_5d` 제거
-- 🔧 ML Walk-Forward CV VAL_STEP 20→10, Purging 10→20거래일 강화
-- 🔧 앙상블 Softmax 가중치 정규화, Classifier·Ranker 분리 집계
-- 📝 `docs/QUALITY_SCREENING.md` 신설 — 우량주 스크리닝 시스템 전체 기술 문서
+- 🐛 `StandardScaler` feature names 불일치 경고 수정 (`prediction_model.py`)
+- 🐛 `pct_change(fill_method=None)` / `yf.download(auto_adjust=True)` FutureWarning 제거
+- 🐛 `SettingWithCopyWarning` 수정 — boolean 슬라이스 후 `.copy()` 추가 (`provider.py`)
+- 🔧 `outcome_tracker.py` 안정성 대폭 강화: `entry_price <= 0` 방어, `_get_date_range()` 헬퍼, DB `exc_info=True`, HORIZONS 주석 명시
+- 🔧 `database.py`: `session_date` 인덱스 추가 (`recommendations`, `recommendation_outcomes`)
+- 🔧 `dashboard.js`: `statCard()` `ev=0` 오판 버그 수정 (`!ev` → `ev == null`)
+- 🔧 API 에러 응답에서 내부 정보 마스킹 (`recommendations.py`)
+- 🔧 `cli.py` sync: 관심종목(watchlist) 자동 백업·복원
+
+### v0.4.1 (2026-03-10) — 우량주 스크리너 추가 · ML 피처 개선 · 대시보드 히트맵 개선 · UI 품질 강화
+
+- ✨ `우량주 추천` 탭 신설 (대시보드 5번째 탭) — ROE·영업이익률·YoY성장·부채비율·PBR 필터 + 우량점수 정렬, 배당수익률 표시
+- ✨ `koreanstocks quality` CLI 명령어 신설
+- ✨ `GET /api/quality_stocks` 엔드포인트 신설
+- ✨ 추천 지속성 히트맵 개선 — 연속 추천(🔥)과 비연속 반복 추천(🔄/📌) 구분 배지 + 점수 범례 추가
+- 🔧 ML 피처 3개 추가: `obv_trend`, `rsi`, `cci_pct` — 17→20개
+- 🔧 ML Walk-Forward CV: VAL_STEP 20→10 거래일 (fold ~24→~48), Purging 10→20거래일 강화
+- 🔧 ML 모델 depth 조정: RF max_depth 4→5, CatBoost depth 2→3
+- 🔧 앙상블 Softmax 가중치 정규화, Classifier·Ranker 분리 집계 (75%:25%)
+- 🐛 `bool(numpy.bool_)` JSON 직렬화 오류 수정 (Python 3.13 + NumPy 2.x 호환)
+- 📝 `docs/QUALITY_SCREENING.md` 신설
 
 ### v0.4.0 (2026-03-06) — 가치주 스크리닝 기능 추가
 
-- ✨ `가치주 추천` 탭 신설 (대시보드 7번째 탭) — PER·PBR·ROE·부채비율·F-Score 필터 + 가치점수 정렬, 초보자용 지표 가이드
-- ✨ `koreanstocks value` CLI 명령어 신설 — 가치주 스크리닝 터미널 직접 실행
+- ✨ `가치주 추천` 탭 신설 — PER·PBR·ROE·부채비율·F-Score 필터 + value_score 정렬
+- ✨ `koreanstocks value` CLI 명령어 신설
 - ✨ `GET /api/value_stocks` 엔드포인트 신설 — Piotroski F-Score + value_score 복합 정렬
-- 🐛 `fundamental_provider.py` DART 재작성 — ROE·부채비율 대차대조표에서 직접 계산 (wisereport AJAX 불가 해소)
-- 🔧 `provider.py` `get_value_candidates()` 신설 — 시가총액 기준 PER/ROE 사전 필터 후보군 병렬 수집
-- 🔧 `value_screener.py` 당일 인메모리 캐시 — 동일 조건 재실행 즉시 반환 (1~2분 → 0초)
-- 🔧 대시보드 탐색 범위 드롭다운(100/200/300종목) — candidate_limit 직접 노출, 의미 있는 UX
-- 📝 `docs/VALUE_SCREENING.md` 신설 — 가치주 스크리닝 시스템 전체 기술 문서 (후보군·DART·필터·F-Score·value_score·캐시·API·CLI)
+- 🐛 `fundamental_provider.py` DART 재작성 — ROE·부채비율 대차대조표에서 직접 계산
+- 🔧 `value_screener.py` 당일 인메모리 캐시 추가
+- 📝 `docs/VALUE_SCREENING.md` 신설
 
-### v0.3.x (2026-02-28 ~ 2026-03-05) — 추천 성과 추적 · 버킷 UI · pykrx 제거 · 5-모델 앙상블 · 기술 부채 해소
+### v0.3.x (2026-02-28 ~ 2026-03-05) — 추천 성과 추적 · 5-모델 앙상블 · pykrx 제거
 
-- ✨ 추천 성과 추적 기능 (5·10·20거래일 후 실적 검증, `outcomes` CLI 및 Web UI)
-- ✨ 추천 버킷(거래량 상위/상승 모멘텀/반등 후보) 배지 UI — 대시보드·슬라이드 동시 반영
-- ✨ 기본 추천 종목 수 5 → 9개 상향, 분석 설정 종목 수 자동 선택 로직
-- ✨ LightGBM · CatBoost 모델 추가 → 5-모델 앙상블 (RF · GB · LGB · CB · XGBRanker)
-- ✨ XGBoost 이진 분류 → XGBRanker (rank:ndcg) 교체 — 크로스섹셔널 순위 직접 최적화
-- ✨ `/api/version` 엔드포인트 신설 — 대시보드가 API로 버전 동적 조회
-- 🐛 `/api/market` NaN → JSON 직렬화 오류 수정
-- 🐛 `prediction_model.py` `mom_accel` 공식 수정 — 학습/추론 불일치 해소
-- 🐛 CLI `recommend` 명령 `--limit` 인수 누락 버그 수정
-- 🔧 pykrx 완전 제거 → FinanceDataReader + KIND API (KRX 정책 변경 대응)
-- 🔧 버전 단일 소스 (`__init__.py`) 구조 확립, 버킷 상수 `core/constants.py` 통합
-- 🔧 atr_ratio → rolling 60일 percentile 변환, 피처 교체 (bb_position·mfi·low_52w_ratio)
-- 🔧 뉴스 캐시 TTL 1시간, 감성 분석 퀀트 애널리스트 프롬프트 추가
+- ✨ 추천 성과 추적 (5·10·20거래일 후 실적 검증, `outcomes` CLI 및 Web UI)
+- ✨ 버킷 배지 UI (거래량 상위/상승 모멘텀/반등 후보) — 대시보드·슬라이드 동시 반영
+- ✨ LightGBM · CatBoost 추가 → 5-모델 앙상블
+- ✨ XGBoost 이진 분류 → XGBRanker (rank:ndcg) 교체
+- ✨ `/api/version` 엔드포인트 신설
+- 🔧 pykrx 완전 제거 → FinanceDataReader + KIND API
 
 ---
 
