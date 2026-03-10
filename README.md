@@ -85,7 +85,83 @@ DB          SQLite (data/storage/stock_analysis.db)
 
 세 가지 독립적인 분석 파이프라인: **단기 AI 추천** · **중기 가치주 스크리닝** · **장기 우량주 스크리닝**
 
-![시스템 아키텍처](https://raw.githubusercontent.com/bullpeng72/KoreanStocks/main/docs/diagrams/architecture.svg)
+```mermaid
+graph TD
+    CLI["🖥 CLI<br/>serve · recommend · analyze · train<br/>outcomes · value · quality · init · sync · home"]
+    USER["👤 사용자<br/>브라우저"]
+
+    subgraph API["⚡ FastAPI  (koreanstocks.api)"]
+        RA["AI 추천 · 분석 · Watchlist<br/>백테스트 · 시장 · 모델"]
+        RV["가치주 · 우량주<br/>GET /api/value_stocks<br/>GET /api/quality_stocks"]
+    end
+
+    subgraph FRONTEND["🌐 대시보드 (dashboard.html — 8탭)"]
+        F1["① Dashboard<br/>시장지수 · AI추천 · 히트맵"]
+        F2["② Watchlist<br/>관심종목 관리"]
+        F3["③ AI 추천<br/>ML 추천 · 성과 추적"]
+        F4["④ 가치주 추천<br/>F-Score · value_score"]
+        F5["⑤ 우량주 추천<br/>quality_score · ROE 지속성"]
+        F6["⑥ 백테스트<br/>전략 시뮬레이션"]
+        F7["⑦ 모델 신뢰도<br/>AUC · 피처 중요도"]
+        F8["⑧ 설정<br/>수동 실행 · 데이터 소스"]
+    end
+
+    subgraph PIPELINE_AI["🤖 단기 AI 추천 (1~2주)"]
+        E1["indicators.py<br/>기술적 지표 → tech_score"]
+        E2["prediction_model.py<br/>5-모델 앙상블 → ml_score<br/>RF · GB · LGB · CB · XGBRanker"]
+        E3["news_agent.py<br/>뉴스 감성 → sentiment_score<br/>GPT-4o-mini"]
+        E4["analysis_agent.py<br/>4단계 심층 분석"]
+        E5["recommendation_agent.py<br/>버킷 기반 종목 선정<br/>composite score 산출"]
+    end
+
+    subgraph PIPELINE_FUND["💰 펀더멘털 스크리닝"]
+        V1["value_screener.py<br/>중기 가치주 (3~6개월)<br/>Piotroski F-Score + value_score"]
+        Q1["quality_screener.py<br/>장기 우량주 (6개월+)<br/>quality_score · ROE 2개년 평균"]
+    end
+
+    subgraph DATA["📊 Data Layer"]
+        D1["provider.py<br/>FinanceDataReader · KIND API<br/>OHLCV · 시장지수 · 종목목록"]
+        D2["fundamental_provider.py<br/>DART Open API<br/>PER · PBR · ROE · 부채비율"]
+        D3["database.py<br/>SQLite CRUD<br/>추천결과 · 분석이력 · 뉴스캐시"]
+    end
+
+    subgraph EXT["🌐 외부 데이터"]
+        X1["FinanceDataReader / KIND API<br/>OHLCV · 종목목록"]
+        X2["Naver News API<br/>종목 뉴스"]
+        X3["DART Open API<br/>재무제표 공시"]
+        X4["OpenAI GPT-4o-mini<br/>감성 분석 · AI 의견"]
+        X5["Yahoo Finance<br/>VIX · S&P500"]
+    end
+
+    subgraph STORAGE["💾 저장소"]
+        S1[("stock_analysis.db")]
+        S2["models/saved/*.pkl<br/>학습된 ML 모델"]
+    end
+
+    CLI -->|서버 기동| API
+    CLI -->|직접 실행| PIPELINE_AI
+    CLI -->|value / quality| PIPELINE_FUND
+
+    USER --> FRONTEND
+    FRONTEND -->|REST| API
+    API --> RA --> PIPELINE_AI
+    API --> RV --> PIPELINE_FUND
+
+    PIPELINE_AI --> E1 & E2 & E3
+    E1 & E2 & E3 --> E4 --> E5 --> D3
+
+    PIPELINE_FUND --> V1 & Q1
+    V1 & Q1 --> D1 & D2
+
+    D1 --> X1
+    D2 --> X3
+    E3 --> X2 & X4
+    E4 --> X4
+    E1 & E2 --> X5
+
+    D3 --> S1
+    E2 --> S2
+```
 
 ---
 
@@ -95,15 +171,43 @@ DB          SQLite (data/storage/stock_analysis.db)
 
 #### 버킷 기반 후보군 선정
 
-![버킷 기반 후보군 선정](https://raw.githubusercontent.com/bullpeng72/KoreanStocks/main/docs/diagrams/bucket_selection.svg)
+```mermaid
+flowchart TD
+    A["FinanceDataReader + KIND API<br/>KOSPI · KOSDAQ 전체 종목"] --> B["시장 필터<br/>KOSPI / KOSDAQ / ALL"]
+    B --> V["🟦 거래량 상위<br/>40% 쿼터"]
+    B --> M["🟩 상승 모멘텀<br/>+2%~+15%<br/>35% 쿼터"]
+    B --> R["🟥 반등 후보<br/>거래량 상위 중 하락<br/>25% 쿼터"]
+
+    V & M & R --> POOL["분석 풀 구성<br/>min(limit × 8, 80)개<br/>limit=9 → 최대 72종목"]
+```
 
 #### 종목별 심층 분석 (4단계 병렬)
 
-![종목별 심층 분석 파이프라인](https://raw.githubusercontent.com/bullpeng72/KoreanStocks/main/docs/diagrams/analysis_pipeline.svg)
+```mermaid
+flowchart TD
+    POOL["분석 풀 (최대 80종목)"] --> PAR["병렬 분석<br/>max_workers=5 · timeout=60s"]
+
+    PAR --> T["1단계 기술적 지표<br/>tech_score 0~100<br/>추세(40) + 모멘텀(30) + BB/CMF/거래량(30)"]
+    PAR --> ML["2단계 ML 앙상블<br/>ml_score 0~100<br/>RF · GB · LGB · CB + XGBRanker<br/>20개 피처 · 101분위 캘리브레이션"]
+    PAR --> N["3단계 뉴스 감성<br/>sentiment_score -100~100<br/>GPT-4o-mini · 지수감쇠 시간가중"]
+
+    T & ML & N --> GPT["4단계 GPT-4o-mini<br/>AI 종합 의견<br/>BUY/HOLD/SELL · 목표가 · 강점/약점"]
+    GPT --> C["종합 점수 산출<br/>tech×0.40 + ml×0.35 + sentiment_norm×0.25"]
+    C --> Q["버킷 쿼터 기반 최종 N종목<br/>섹터 다양성 고려"]
+    Q --> DB[("SQLite DB<br/>날짜별 저장")]
+    Q --> TG["📱 텔레그램<br/>구조화 리포트"]
+```
 
 #### 종합 점수 공식
 
-![종합 점수 공식](https://raw.githubusercontent.com/bullpeng72/KoreanStocks/main/docs/diagrams/score_formula.svg)
+```mermaid
+flowchart LR
+    T["Tech Score<br/>0~100"] -->|"× 0.40"| SUM["종합 점수<br/>0~100"]
+    ML["ML Score<br/>0~100"] -->|"× 0.35"| SUM
+    N["News Score<br/>-100~100 → 정규화 0~100"] -->|"× 0.25"| SUM
+    SUM --> FB["※ ML 모델 없을 때<br/>tech×0.65 + sentiment_norm×0.35"]
+    style FB fill:#f9f,stroke:#999,stroke-dasharray:5 5
+```
 
 > `sentiment_norm = (sentiment_score + 100) / 2`  → 0~100 정규화
 
@@ -113,7 +217,37 @@ DB          SQLite (data/storage/stock_analysis.db)
 
 #### 5-모델 앙상블 구조
 
-![ML 앙상블 구조](https://raw.githubusercontent.com/bullpeng72/KoreanStocks/main/docs/diagrams/ml_ensemble.svg)
+```mermaid
+flowchart LR
+    subgraph FEAT["입력 피처 (20개)"]
+        F1["변동성·추세강도<br/>atr_ratio · adx<br/>bb_width · bb_position"]
+        F2["시장 상대강도<br/>rs_vs_mkt_3m"]
+        F3["모멘텀·추세<br/>high_52w_ratio · mom_accel<br/>macd_diff · macd_slope_5d<br/>price_sma_5_ratio"]
+        F4["finta 지표<br/>fisher · bullish_fractal_5d"]
+        F5["거래량·강도<br/>mfi · vzo · obv_trend<br/>low_52w_ratio"]
+        F6["극값감지·반전<br/>rsi · cci_pct"]
+        F7["거시경제<br/>vix_level · sp500_1m"]
+    end
+
+    subgraph MODELS["5-모델 앙상블"]
+        RF["Random Forest<br/>(분류기)"]
+        GB["Gradient Boosting<br/>(분류기)"]
+        LGB["LightGBM<br/>(분류기)"]
+        CB["CatBoost<br/>(분류기)"]
+        XGB["XGBoost Ranker<br/>(rank:ndcg)"]
+    end
+
+    subgraph AGG["집계"]
+        CLS["분류기 평균<br/>AUC 기반 Softmax 가중치<br/>75%"]
+        RNK["랜커 점수<br/>25%"]
+        CAL["101분위수 캘리브레이션<br/>→ 0~100 균등 스케일"]
+    end
+
+    FEAT --> MODELS
+    RF & GB & LGB & CB --> CLS
+    XGB --> RNK
+    CLS & RNK --> CAL
+```
 
 **ML 학습 설정:**
 - **타깃:** 10거래일 후 수익률 상위 25% = 1 / 하위 25% = 0 (중간 50% neutral zone 제외)
@@ -124,7 +258,16 @@ DB          SQLite (data/storage/stock_analysis.db)
 
 ### 가치주 스크리닝 파이프라인 (중기 3~6개월)
 
-![가치주 스크리닝 파이프라인](https://raw.githubusercontent.com/bullpeng72/KoreanStocks/main/docs/diagrams/value_pipeline.svg)
+```mermaid
+flowchart TD
+    A["Naver 시가총액 순위 페이지<br/>병렬 스크래핑<br/>탐색 범위: 100 / 200 / 300종목"] --> B["사전 필터<br/>PER > 0 · ROE > 0<br/>시가총액 500억 이상"]
+    B --> C["DART Open API<br/>펀더멘털 수집<br/>PER · PBR · ROE · 부채비율 · 영업이익YoY<br/>※ 연도 폴백: 전년사업보고서 → 반기 → 전전년"]
+    C --> D["6단계 필터<br/>PER ≤ 25 · PBR ≤ 3<br/>ROE ≥ 8% · 부채비율 ≤ 150%<br/>영업이익YoY ≥ -15% · F-Score ≥ 4"]
+    D --> E["Piotroski F-Score<br/>9점 만점<br/>수익성(P1~P3) + 안전성(L1~L3) + 성장성(E1~E3)"]
+    D --> F["value_score<br/>0~100점<br/>PER(25) + PBR(15) + ROE(20)<br/>부채비율(15) + 영업이익YoY(30) + 배당(10)"]
+    E & F --> G["복합 정렬<br/>value_score × 0.7 + F-Score_normalized × 0.3"]
+    G --> H["결과 반환<br/>당일 인메모리 캐시<br/>동일 조건 재실행 → 즉시 반환"]
+```
 
 #### Piotroski F-Score 구성 (9점)
 
@@ -144,7 +287,15 @@ DB          SQLite (data/storage/stock_analysis.db)
 
 ### 우량주 스크리닝 파이프라인 (장기 6개월+)
 
-![우량주 스크리닝 파이프라인](https://raw.githubusercontent.com/bullpeng72/KoreanStocks/main/docs/diagrams/quality_pipeline.svg)
+```mermaid
+flowchart TD
+    A["Naver 시가총액 순위 페이지<br/>탐색 범위: 100 / 200 / 300종목"] --> B["사전 필터<br/>ROE > 0 · 시가총액 500억 이상"]
+    B --> C["DART Open API<br/>ROE 2개년 평균 · 영업이익률<br/>영업이익YoY · 부채비율 · 배당수익률<br/>※ 연도 폴백: 전년사업보고서 → 반기"]
+    C --> D["5단계 필터<br/>ROE ≥ roe_min · 영업이익률 ≥ op_margin_min<br/>영업이익YoY ≥ yoy_min · 부채비율 ≤ debt_max<br/>PBR ≤ pbr_max"]
+    D --> E["quality_score<br/>0~100점<br/>ROE(30) + 영업이익률(25)<br/>영업이익YoY(20) + 부채비율(15) + 배당(10)"]
+    E --> F["ROE 2개년 평균<br/>일시적 고ROE 필터링<br/>지속 성장 기업 확인"]
+    F --> G["quality_score 내림차순 정렬<br/>당일 인메모리 캐시"]
+```
 
 ---
 
@@ -241,7 +392,19 @@ DB          SQLite (data/storage/stock_analysis.db)
 
 > **권장 브라우저: Chrome / Firefox (최신 버전)**
 
-![대시보드 메뉴 구성](https://raw.githubusercontent.com/bullpeng72/KoreanStocks/main/docs/diagrams/dashboard_tabs.svg)
+```mermaid
+flowchart LR
+    DASH["http://localhost:8000/dashboard"]
+
+    DASH --> T1["① Dashboard<br/>시장지수 · 포트폴리오 요약<br/>날짜별 AI 추천 리포트<br/>추천 지속성 히트맵 🔥🔄📌"]
+    DASH --> T2["② Watchlist<br/>관심 종목 등록·삭제<br/>실시간 심층 분석<br/>분석 이력 타임라인"]
+    DASH --> T3["③ AI 추천<br/>테마·시장별 추천 생성<br/>날짜 선택 히스토리<br/>📊 5·10·20거래일 성과 추적"]
+    DASH --> T4["④ 가치주 추천<br/>PER·PBR·ROE·부채비율·F-Score 필터<br/>value_score 복합 정렬<br/>탐색 범위 100/200/300종목"]
+    DASH --> T5["⑤ 우량주 추천<br/>ROE·영업이익률·YoY·부채비율 필터<br/>quality_score 정렬<br/>ROE 2개년 지속성 확인"]
+    DASH --> T6["⑥ 백테스트<br/>RSI / MACD / COMPOSITE<br/>단순보유 비교 차트<br/>초보자 해석 가이드"]
+    DASH --> T7["⑦ 모델 신뢰도<br/>5모델 AUC · 과적합 갭<br/>드리프트 등급 · 피처 중요도<br/>재학습 권장 여부"]
+    DASH --> T8["⑧ 설정<br/>수동 일일 업데이트 실행<br/>텔레그램·데이터소스 상태 확인"]
+```
 
 | 탭 | 주요 기능 | 투자 관점 |
 |----|----------|-----------|
@@ -262,7 +425,18 @@ DB          SQLite (data/storage/stock_analysis.db)
 
 ### 투자 시계 (Investment Horizon) 선택
 
-![투자 시계 선택 가이드](https://raw.githubusercontent.com/bullpeng72/KoreanStocks/main/docs/diagrams/investment_horizon.svg)
+```mermaid
+flowchart TD
+    START["투자 목적 선택"] --> S1["단기 트레이딩<br/>1~2주"]
+    START --> S2["중기 투자<br/>3~6개월"]
+    START --> S3["장기 투자<br/>6개월+"]
+
+    S1 --> A1["AI 추천 탭 사용<br/>tech_score + ml_score + sentiment<br/>종합 점수 65+ · BUY 신호 우선"]
+    S2 --> A2["가치주 추천 탭 사용<br/>value_score 60+ · F-Score 6+<br/>PER ≤ 15 · ROE ≥ 10%"]
+    S3 --> A3["우량주 추천 탭 사용<br/>quality_score 70+<br/>ROE 2개년 ≥ 15% · 영업이익률 ≥ 15%"]
+
+    A1 & A2 & A3 --> CHECK["두 신호 이상 일치 시<br/>최우선 검토 대상"]
+```
 
 ### 단기 AI 추천 활용 단계별 가이드
 
@@ -488,7 +662,26 @@ python tests/compat_check.py          # Python 3.11~3.13 호환성 검증
 
 **실행 시점:** 평일 오후 16:30 KST (UTC 07:30) — 장 마감 후 자동 실행
 
-![GitHub Actions 워크플로](https://raw.githubusercontent.com/bullpeng72/KoreanStocks/main/docs/diagrams/github_actions.svg)
+```mermaid
+flowchart TD
+    TRIGGER["⏰ 16:30 KST 평일 자동 실행<br/>(또는 수동 workflow_dispatch)"]
+    TRIGGER --> TRADING{"한국 증시 거래일?"}
+
+    TRADING -- 휴장 --> SKIP["📅 텔레그램 휴장일 알림"]
+
+    TRADING -- 거래일 --> OUTCOME["지난 추천 성과 기록<br/>5·10·20거래일 후 수익률 집계<br/>→ 텔레그램 성과 리포트"]
+    OUTCOME --> STOCKLIST["KOSPI + KOSDAQ 전체 종목 갱신"]
+    STOCKLIST --> BUCKETS["버킷 기반 후보군 선정<br/>거래량 상위 / 상승 모멘텀 / 반등 후보"]
+    BUCKETS --> ANALYSIS["심층 분석 (병렬)<br/>기술 + ML + 뉴스 + GPT"]
+    ANALYSIS --> SELECT["종합 점수 상위 9종목 선정<br/>버킷 쿼터 + 섹터 다양성"]
+    SELECT --> SAVE[("SQLite DB 저장")]
+    SAVE --> ARTIFACT["GitHub Artifact 백업 (90일)"]
+    SAVE --> COMMIT["저장소에 DB 커밋·푸시"]
+    COMMIT --> NOTIFY["📱 텔레그램 추천 리포트"]
+
+    COMMIT --> SYNC1["git clone 환경 → git pull"]
+    COMMIT --> SYNC2["PyPI 설치 → koreanstocks sync"]
+```
 
 **GitHub Secrets 등록 (Settings > Secrets and variables > Actions):**
 
