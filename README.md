@@ -1,6 +1,6 @@
 # 📈 Korean Stocks AI/ML Analysis System
 
-![version](https://img.shields.io/badge/version-0.4.3-blue)
+![version](https://img.shields.io/badge/version-0.4.4-blue)
 ![python](https://img.shields.io/badge/python-3.11~3.13-green)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
@@ -67,7 +67,8 @@ UI          FastAPI + Reveal.js (일일 브리핑) + Vanilla JS (인터랙티브
 CLI         Typer (10개 명령어: serve / recommend / analyze / train / outcomes / value / quality / init / sync / home)
 AI/LLM      OpenAI GPT-4o-mini (뉴스 감성 분석, AI 종합 의견)
 ML          Scikit-learn (Random Forest, Gradient Boosting) + XGBoost Ranker + LightGBM + CatBoost
-            → 5-모델 앙상블 (분류기 75% + 랜커 25%, AUC 기반 Softmax 가중치)
+            + PyTorch TCN (선택적, pip install koreanstocks[dl])
+            → 6-모델 앙상블 (분류기+TCN 75% + 랜커 25%, AUC 기반 Softmax 가중치)
 기술 지표    ta (RSI, MACD, BB, SMA, OBV, ADX, VWAP, CMF, MFI, Stochastic, CCI, ATR, Donchian)
              + finta (SQZMI, VZO, Fisher Transform, Williams Fractal)
 ML 피처     20개 (변동성·추세강도·시장 상대강도·모멘텀·finta·거래량·거시경제·극값감지)
@@ -108,7 +109,7 @@ graph TD
 
     subgraph PIPELINE_AI["🤖 단기 AI 추천 (1~2주)"]
         E1["indicators.py<br/>기술적 지표 → tech_score"]
-        E2["prediction_model.py<br/>5-모델 앙상블 → ml_score<br/>RF · GB · LGB · CB · XGBRanker"]
+        E2["prediction_model.py<br/>6-모델 앙상블 → ml_score<br/>RF · GB · LGB · CB · XGBRanker · TCN"]
         E3["news_agent.py<br/>뉴스 감성 → sentiment_score<br/>GPT-4o-mini"]
         E4["analysis_agent.py<br/>4단계 심층 분석"]
         E5["recommendation_agent.py<br/>버킷 기반 종목 선정<br/>composite score 산출"]
@@ -215,7 +216,7 @@ flowchart LR
 
 ### 2단계 — ML 앙상블 (ml_score, 0~100)
 
-#### 5-모델 앙상블 구조
+#### 6-모델 앙상블 구조
 
 ```mermaid
 flowchart LR
@@ -229,22 +230,23 @@ flowchart LR
         F7["거시경제<br/>vix_level · sp500_1m"]
     end
 
-    subgraph MODELS["5-모델 앙상블"]
+    subgraph MODELS["6-모델 앙상블"]
         RF["Random Forest<br/>(분류기)"]
         GB["Gradient Boosting<br/>(분류기)"]
         LGB["LightGBM<br/>(분류기)"]
         CB["CatBoost<br/>(분류기)"]
+        TCN["TCN<br/>(딥러닝, 선택적)"]
         XGB["XGBoost Ranker<br/>(rank:ndcg)"]
     end
 
     subgraph AGG["집계"]
-        CLS["분류기 평균<br/>AUC 기반 Softmax 가중치<br/>75%"]
+        CLS["분류기+TCN 평균<br/>AUC 기반 Softmax 가중치<br/>75%"]
         RNK["랜커 점수<br/>25%"]
         CAL["101분위수 캘리브레이션<br/>→ 0~100 균등 스케일"]
     end
 
     FEAT --> MODELS
-    RF & GB & LGB & CB --> CLS
+    RF & GB & LGB & CB & TCN --> CLS
     XGB --> RNK
     CLS & RNK --> CAL
 ```
@@ -705,7 +707,7 @@ KoreanStocks/
 ├── train_models.py                      # ML 모델 재학습 스크립트
 ├── src/
 │   └── koreanstocks/
-│       ├── __init__.py                  # VERSION = "0.4.3"
+│       ├── __init__.py                  # VERSION = "0.4.4"
 │       ├── cli.py                       # Typer CLI (10개 명령어)
 │       ├── api/
 │       │   ├── app.py                   # FastAPI 앱 팩토리
@@ -737,7 +739,7 @@ KoreanStocks/
 │           │   ├── indicators.py            # 기술적 지표 계산
 │           │   ├── features.py              # ML 피처 추출 (20개, 공유)
 │           │   ├── strategy.py              # 전략별 시그널 생성
-│           │   ├── prediction_model.py      # 5-모델 앙상블 추론
+│           │   ├── prediction_model.py      # 6-모델 앙상블 추론 (트리 5 + TCN)
 │           │   ├── news_agent.py            # 뉴스 수집 + GPT 감성
 │           │   ├── analysis_agent.py        # 종목 심층 분석 오케스트레이터
 │           │   ├── recommendation_agent.py  # 버킷 기반 추천 생성
@@ -767,6 +769,18 @@ KoreanStocks/
 ---
 
 ## 📝 변경 이력
+
+### v0.4.4 (2026-03-11) — TCN 딥러닝 앙상블 추가 · 과적합 억제 · 추천 성과 UI 개선
+
+- ✨ `tcn_model.py` 신규: Dilated Causal Conv1D 기반 TCN 이진 분류 모델 (Walk-Forward CV + Early Stopping)
+- ✨ `trainer.py`: TCN 학습 파이프라인 통합 — 트리 모델과 병렬 수집, 크로스섹셔널 이진 라벨 생성
+- ✨ `prediction_model.py`: 6-모델 앙상블 — TCN 추론 블록 추가 (AUC 게이트 0.52, OOF calibration)
+- ✨ `models.py`: 모델 신뢰도 탭에 TCN 카드 포함 (`tcn_params.json` 읽기, logloss "N/A (딥러닝 BCE)")
+- ✨ `dashboard.js`: 추천 성과 동일 종목 Collapse UI — 최신 요약행 + 이전 이력 접기/펼치기 (`_ocToggle`)
+- 🔧 TCN 과적합 억제: `DROPOUT 0.3 → 0.4`, `weight_decay 1e-4 → 5e-4` (L2 정규화 5배 강화)
+- 🔧 `pyproject.toml`: `[project.optional-dependencies] dl = ["torch>=2.0"]` 추가 (선택적 TCN 설치)
+- 🔧 `dashboard.js`: `renderEnsembleSummary()` 모델 수 동적화, TCN 활성 표시; `renderFeatureChart()` TCN 아키텍처 정보 표시
+- 🔧 `theme.css`: `.oc-hidden { display: none }`, `.oc-sub-row` 스타일 추가
 
 ### v0.4.3 (2026-03-11) — 추천 지속성 히트맵 고도화 · 성과 추적 버그 수정 · UX 개선
 

@@ -29,6 +29,7 @@ from koreanstocks.core.constants import MIN_MODEL_AUC
 from koreanstocks.core.data.provider import data_provider
 from koreanstocks.core.engine.indicators import indicators
 from koreanstocks.core.engine.features import build_features, BASE_FEATURE_COLS
+from koreanstocks.core.engine import tcn_model as _tcn
 
 logger = logging.getLogger("koreanstocks.trainer")
 
@@ -393,10 +394,58 @@ def _collect_stock_features(code: str, period: str, future_days: int,
         return pd.DataFrame()
 
 
+def _collect_stock_tcn(code: str, period: str, future_days: int,
+                        market_df: pd.DataFrame = None,
+                        macro_df: pd.DataFrame = None) -> Optional[dict]:
+    """TCN용: 단일 종목의 전체 피처 시계열 + 이진 라벨 반환.
+
+    Returns:
+        {'features': DataFrame(날짜×피처), 'labels': Series(날짜→0/1)}
+        또는 None (데이터 부족 시)
+    """
+    try:
+        df = data_provider.get_ohlcv(code, period=period)
+        if df is None or df.empty or len(df) < 60:
+            return None
+        df_ind = indicators.calculate_all(df)
+        if df_ind.empty:
+            return None
+        feat = build_features(df_ind, market_df=market_df, macro_df=macro_df)
+        if len(feat) <= future_days + _tcn.LOOKBACK:
+            return None
+
+        close      = df_ind['close'].reindex(feat.index)
+        future_ret = (close.shift(-future_days) - close) / close
+        valid_idx  = feat.index[:-future_days]
+        feat_valid = feat.loc[valid_idx]
+        ret_valid  = future_ret.loc[valid_idx]
+
+        feat_cols = [c for c in BASE_FEATURE_COLS if c in feat_valid.columns]
+        feat_clean = feat_valid[feat_cols].dropna()
+        ret_align  = ret_valid.reindex(feat_clean.index).dropna()
+        feat_clean = feat_clean.reindex(ret_align.index)
+
+        if len(ret_align) < 30:
+            return None
+
+        # 크로스섹셔널 라벨은 fetch_train_test_samples 가 처리하므로
+        # 여기서는 raw_return만 담아 반환 → 호출 측에서 rank 기반 라벨 변환
+        return {'features': feat_clean, 'raw_return': ret_align}
+
+    except Exception as exc:
+        logger.error(f"  [{code}] TCN 수집 오류: {exc}")
+        return None
+
+
 def fetch_train_test_samples(
     codes: List[str], period: str, future_days: int, test_ratio: float = 0.2
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """크로스섹셔널 상대 강도 순위를 타깃으로 하는 학습/검증 세트 수집."""
+) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """크로스섹셔널 상대 강도 순위를 타깃으로 하는 학습/검증 세트 수집.
+
+    Returns:
+        (df_train, df_test, tcn_stock_data)
+        tcn_stock_data: {code: {'features': DataFrame, 'labels': Series}} — TCN 학습용
+    """
     market_df = _fetch_market_returns('KS11', period)
     if market_df.empty:
         logger.warning("KS11 시장 데이터 미수신 — rs_vs_mkt 피처는 0으로 채워집니다.")
@@ -415,33 +464,43 @@ def fetch_train_test_samples(
 
     logger.info(f"  종목 {len(codes)}개 병렬 수집 중 (max_workers=5, socket_timeout=30s)...")
     frames = []
+    tcn_raw: dict = {}   # {code: {'features': df, 'raw_return': series}}
     executor = ThreadPoolExecutor(max_workers=5)
     try:
-        futures = {
-            executor.submit(_collect_stock_features, c, period, future_days, market_df, macro_df): c
+        # 트리 모델용 + TCN용 동시 수집 (같은 데이터, 다른 형태)
+        tree_futures = {
+            executor.submit(_collect_stock_features, c, period, future_days, market_df, macro_df): ('tree', c)
             for c in codes
         }
+        tcn_futures = {
+            executor.submit(_collect_stock_tcn, c, period, future_days, market_df, macro_df): ('tcn', c)
+            for c in codes
+        } if _tcn.is_available() else {}
+
+        all_futures = {**tree_futures, **tcn_futures}
         try:
-            for fut in as_completed(futures, timeout=600):
+            for fut in as_completed(all_futures, timeout=600):
+                kind, c = all_futures[fut]
                 try:
                     result = fut.result()
-                    if not result.empty:
-                        frames.append(result)
+                    if kind == 'tree':
+                        if result is not None and not result.empty:
+                            frames.append(result)
+                    else:
+                        if result is not None:
+                            tcn_raw[c] = result
                 except Exception as e:
-                    logger.error(f"  [{futures[fut]}] 병렬 수집 오류: {e}")
+                    logger.error(f"  [{c}/{kind}] 병렬 수집 오류: {e}")
         except _FuturesTimeout:
-            done_codes = [futures[f] for f in futures if f.done()]
-            hung_codes = [futures[f] for f in futures if not f.done()]
+            done_codes = [all_futures[f] for f in all_futures if f.done()]
+            hung_codes = [all_futures[f] for f in all_futures if not f.done()]
             logger.warning(
-                f"  ⚠️  수집 타임아웃: {len(done_codes)}/{len(codes)}개 완료 "
-                f"— 미완료 {len(hung_codes)}개 종목 건너뜀: {hung_codes}"
+                f"  ⚠️  수집 타임아웃: {len(done_codes)}/{len(all_futures)}개 완료 "
+                f"— 미완료 {len(hung_codes)}개 건너뜀"
             )
     finally:
-        executor.shutdown(wait=False)          # hung 스레드 대기 없이 즉시 반환
-        socket.setdefaulttimeout(_prev_timeout)  # 소켓 타임아웃 복원
-
-    if not frames:
-        raise RuntimeError("수집된 학습 샘플이 없습니다. 네트워크 또는 종목 코드를 확인하세요.")
+        executor.shutdown(wait=False)
+        socket.setdefaulttimeout(_prev_timeout)
 
     df_all = pd.concat(frames)
 
@@ -488,17 +547,50 @@ def fetch_train_test_samples(
         f"\n날짜별 평균 레이블 종목 수: {stocks_per_date[valid_dates].mean():.1f}"
         f"\n학습 양성 비율: {pos_rate:.1%} (≈50%)"
     )
-    return df_train, df_test
+
+    # ── TCN용: 크로스섹셔널 rank 기반 이진 라벨 생성 ──────────────────────
+    tcn_stock_data: dict = {}
+    if tcn_raw:
+        # 전체 종목의 raw_return을 날짜별로 합산해 rank 계산
+        combined = {}
+        for code, d in tcn_raw.items():
+            for dt, rv in d['raw_return'].items():
+                combined.setdefault(dt, {})[code] = rv
+        # 날짜별 rank → 종목별 이진 라벨 Series 생성
+        code_labels: dict = {}
+        for dt, code_ret in combined.items():
+            if len(code_ret) < MIN_STOCKS_PER_DATE:
+                continue
+            rets   = pd.Series(code_ret)
+            ranks  = rets.rank(pct=True)
+            for code, rp in ranks.items():
+                if rp >= TOP_K_PERCENTILE:
+                    code_labels.setdefault(code, {})[dt] = 1
+                elif rp <= BOTTOM_K_PERCENTILE:
+                    code_labels.setdefault(code, {})[dt] = 0
+                # 중립 구간은 라벨 없음 (TCN build_sequences 가 자동 제외)
+
+        for code, lbl_dict in code_labels.items():
+            if code in tcn_raw:
+                tcn_stock_data[code] = {
+                    'features': tcn_raw[code]['features'],
+                    'labels':   pd.Series(lbl_dict),
+                }
+        logger.info(f"[TCN] 라벨 생성 완료: {len(tcn_stock_data)}개 종목")
+
+    return df_train, df_test, tcn_stock_data
 
 
 def train_and_save(df_train: pd.DataFrame, df_test: pd.DataFrame,
-                   future_days: int = 10) -> None:
+                   future_days: int = 10,
+                   tcn_stock_data: Optional[dict] = None) -> None:
     """모델 학습(이진 분류) → 평가 → 모델/스케일러/파라미터 저장.
 
     타깃: future_days 거래일 후 수익률 상위 25% = 1 / 하위 25% = 0 (중간 50% 제외, 이진 분류)
     지표: AUC-ROC (랜덤 기준선 0.5, 목표 ≥ 0.52)
     교차검증: Walk-Forward (롤링 윈도우, 20거래일 val 스텝, Purging 적용)
     Purging:  각 val 시작 전 future_days 거래일을 학습에서 제거 (label leakage 방지).
+    tcn_stock_data: TCN 전용 시계열 데이터 ({code: {features, labels}}), None이면 TCN 건너뜀.
     """
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     PARAMS_DIR.mkdir(parents=True, exist_ok=True)
@@ -696,6 +788,30 @@ def train_and_save(df_train: pd.DataFrame, df_test: pd.DataFrame,
         cv_str = f"{cv_mu:.4f}" if not np.isnan(cv_mu) else "N/A"
         logger.info(f"  {name:<22} {tauc:>9.4f} {cv_str:>9} {trauc:>9.4f} {gap:>6.4f}  {mark}")
     logger.info(f"{'═'*40}")
+    logger.info(f"✅ 트리 앙상블 저장 완료  →  {MODEL_DIR}")
+
+    # ── TCN 학습 ──────────────────────────────────────────────────────────
+    if tcn_stock_data and _tcn.is_available():
+        logger.info(f"\n{'─'*40}")
+        logger.info("  학습 중: tcn  (Temporal Convolutional Network)")
+        tcn_result = _tcn.train_tcn(
+            tcn_stock_data,
+            future_days=future_days,
+            test_ratio=0.2,
+        )
+        if tcn_result is not None:
+            _tcn.save_tcn(tcn_result, MODEL_DIR, PARAMS_DIR)
+            qmark = "✅" if tcn_result["quality_pass"] else "⚠️ "
+            cv_str = f"{tcn_result['cv_auc_mean']:.4f}" if tcn_result["cv_auc_mean"] else "N/A"
+            logger.info(
+                f"  {'tcn':<22} {tcn_result['test_auc']:>9.4f} {cv_str:>9} "
+                f"{tcn_result['train_auc']:>9.4f} {tcn_result['overfit_gap']:>6.4f}  {qmark}"
+            )
+        else:
+            logger.warning("  [TCN] 학습 실패 또는 건너뜀 — 앙상블에서 제외됩니다.")
+    elif not _tcn.is_available():
+        logger.info("  [TCN] PyTorch 미설치 — 건너뜁니다. (pip install torch)")
+
     logger.info(f"✅ 모든 모델 저장 완료  →  {MODEL_DIR}")
 
 
@@ -734,9 +850,10 @@ def run_training(
     logger.info("=" * 40)
 
     logger.info("\n[1/2] 학습 데이터 수집 중...")
-    df_train, df_test = fetch_train_test_samples(
+    df_train, df_test, tcn_stock_data = fetch_train_test_samples(
         stocks, period=period, future_days=future_days, test_ratio=test_ratio,
     )
 
     logger.info("\n[2/2] 모델 학습 및 저장 중...")
-    train_and_save(df_train, df_test, future_days=future_days)
+    train_and_save(df_train, df_test, future_days=future_days,
+                   tcn_stock_data=tcn_stock_data)

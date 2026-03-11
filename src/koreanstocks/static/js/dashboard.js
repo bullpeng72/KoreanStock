@@ -1569,20 +1569,59 @@ function _outcomeListHtml(outcomes) {
     return `<td class="${cls}" style="text-align:right">${icon} ${ret >= 0 ? "+" : ""}${ret.toFixed(1)}%</td>`;
   }
 
-  const rows = outcomes.map(o => {
-    const dateShort = (o.session_date || "").slice(5);
-    return `<tr>
-      <td style="color:var(--muted)">${esc(dateShort)}</td>
-      <td><span style="font-weight:500">${esc(o.name || o.code)}</span>
-          <span style="font-size:.78em;color:var(--muted);margin-left:4px">${esc(o.code)}</span></td>
-      <td>${badgeHtml(o.action)}</td>
-      <td style="text-align:right;color:var(--muted)">₩${fmt(o.entry_price)}</td>
-      ${retCell(o.outcome_5d)}
-      ${retCell(o.outcome_10d)}
-      ${retCell(o.outcome_20d)}
-      <td style="text-align:right;color:var(--muted)">${o.target_price ? "₩" + fmt(o.target_price) : "—"}</td>
-    </tr>`;
-  }).join("");
+  // 동일 종목을 code 기준으로 그룹핑 (outcomes는 session_date DESC 정렬 → items[0]이 최신)
+  const groups = new Map();
+  for (const o of outcomes) {
+    if (!groups.has(o.code)) groups.set(o.code, []);
+    groups.get(o.code).push(o);
+  }
+
+  const rows = [];
+  let gIdx = 0;
+  for (const [code, items] of groups) {
+    const multi   = items.length > 1;
+    const latest  = items[0]; // 가장 최근 추천
+    const gid     = `ocg${gIdx++}`;
+    const dateShort = (latest.session_date || "").slice(5);
+
+    const countBadge = multi
+      ? `<span style="font-size:.72em;background:var(--accent);color:#fff;border-radius:10px;padding:1px 6px;margin-left:5px">${items.length}회 추천</span>`
+      : "";
+    const arrow = multi
+      ? `<span id="oc-arr-${gid}" style="margin-left:5px;font-size:.78em;color:var(--accent)">▼</span>`
+      : "";
+    const rowClick = multi ? `onclick="_ocToggle('${gid}')" style="cursor:pointer"` : "";
+
+    rows.push(`<tr class="oc-summary-row" ${rowClick}>
+      <td style="color:var(--muted)">${esc(dateShort)}${multi ? `<br><span style="font-size:.7em">최근</span>` : ""}</td>
+      <td><span style="font-weight:500">${esc(latest.name || latest.code)}</span>
+          <span style="font-size:.78em;color:var(--muted);margin-left:4px">${esc(latest.code)}</span>
+          ${countBadge}${arrow}</td>
+      <td>${badgeHtml(latest.action)}</td>
+      <td style="text-align:right;color:var(--muted)">₩${fmt(latest.entry_price)}</td>
+      ${retCell(latest.outcome_5d)}
+      ${retCell(latest.outcome_10d)}
+      ${retCell(latest.outcome_20d)}
+      <td style="text-align:right;color:var(--muted)">${latest.target_price ? "₩" + fmt(latest.target_price) : "—"}</td>
+    </tr>`);
+
+    if (multi) {
+      for (const item of items) {
+        const ds = (item.session_date || "").slice(5);
+        rows.push(`<tr class="oc-sub-row oc-hidden" data-gid="${gid}">
+          <td style="color:var(--muted);padding-left:1.4em">↳ ${esc(ds)}</td>
+          <td style="color:var(--muted)"><span style="font-size:.85em">${esc(item.name || item.code)}</span>
+              <span style="font-size:.75em;margin-left:3px">${esc(item.code)}</span></td>
+          <td>${badgeHtml(item.action)}</td>
+          <td style="text-align:right;color:var(--muted)">₩${fmt(item.entry_price)}</td>
+          ${retCell(item.outcome_5d)}
+          ${retCell(item.outcome_10d)}
+          ${retCell(item.outcome_20d)}
+          <td style="text-align:right;color:var(--muted)">${item.target_price ? "₩" + fmt(item.target_price) : "—"}</td>
+        </tr>`);
+      }
+    }
+  }
 
   return `<table class="bt-data-table">
     <thead><tr>
@@ -1595,8 +1634,16 @@ function _outcomeListHtml(outcomes) {
       <th title="추천 다음날부터 20번째 거래일 종가 기준 수익률">20거래일 수익률</th>
       <th title="GPT가 제시한 목표가. 20거래일 내 장중 고가(BUY)/저가(SELL) 도달 시 달성">AI 목표가</th>
     </tr></thead>
-    <tbody>${rows}</tbody>
+    <tbody>${rows.join("")}</tbody>
   </table>`;
+}
+
+function _ocToggle(gid) {
+  const subRows = document.querySelectorAll(`.oc-sub-row[data-gid="${gid}"]`);
+  const isHidden = subRows.length > 0 && subRows[0].classList.contains("oc-hidden");
+  subRows.forEach(r => r.classList.toggle("oc-hidden", !isHidden));
+  const arr = document.getElementById(`oc-arr-${gid}`);
+  if (arr) arr.textContent = isHidden ? "▲" : "▼";
 }
 
 function initOutcomeDaysBtns() {
@@ -1849,8 +1896,8 @@ function renderEnsembleSummary(ens) {
     <div class="result-grid">
       <div class="result-card">
         <div class="rc-label">활성 모델 수</div>
-        <div class="rc-val">${ens.active_count} / 5</div>
-        <div class="rc-delta" style="color:var(--muted)">RF · GB · LGB · CB · XGBRanker</div>
+        <div class="rc-val">${ens.active_count} / ${ens.total_model_count || 6}</div>
+        <div class="rc-delta" style="color:var(--muted)">RF · GB · LGB · CB · XGBRanker${ens.tcn_active ? " · TCN" : ""}</div>
       </div>
       <div class="result-card">
         <div class="rc-label">평균 Test AUC</div>
@@ -1936,11 +1983,11 @@ function renderModelCards(models) {
       </div>
       <div class="kv-row" style="font-size:.82em">
         <span class="kv-key">Log Loss</span>
-        <span class="kv-val">${m.test_logloss != null ? m.test_logloss.toFixed(4) : "N/A (ranker)"}</span>
+        <span class="kv-val">${m.test_logloss != null ? m.test_logloss.toFixed(4) : (m.logloss_label || "N/A (ranker)")}</span>
       </div>
       <div class="kv-row" style="font-size:.82em">
         <span class="kv-key">학습 샘플</span>
-        <span class="kv-val">${m.training_samples != null ? m.training_samples.toLocaleString() : "—"}</span>
+        <span class="kv-val">${m.training_samples > 0 ? m.training_samples.toLocaleString() : "—"}</span>
       </div>
       <div class="kv-row" style="font-size:.82em">
         <span class="kv-key">Purging</span>
@@ -1999,7 +2046,22 @@ function renderFeatureSection(models) {
 function renderFeatureChart(container, model) {
   const features = model.feature_importances || [];
   if (!features.length) {
-    container.innerHTML = `<span style="color:var(--muted)">피처 중요도 데이터 없음</span>`;
+    // TCN 딥러닝 모델: 피처 중요도 대신 아키텍처 정보 표시
+    const isTcn = model.name === "tcn";
+    container.innerHTML = isTcn
+      ? `<div style="color:var(--muted);font-size:.85em;line-height:1.7">
+           <div style="margin-bottom:8px;color:var(--text);font-weight:600">TCN 아키텍처 정보</div>
+           <div class="kv-row"><span class="kv-key">구조</span><span class="kv-val">Dilated Causal Conv1D × 3</span></div>
+           <div class="kv-row"><span class="kv-key">Dilation</span><span class="kv-val">1 → 2 → 4 (Receptive field: 15 거래일)</span></div>
+           <div class="kv-row"><span class="kv-key">입력 시퀀스</span><span class="kv-val">최근 20 거래일 × 20 피처</span></div>
+           <div class="kv-row"><span class="kv-key">히든 채널</span><span class="kv-val">32</span></div>
+           <div class="kv-row"><span class="kv-key">파라미터 수</span><span class="kv-val">~9,057개 (경량)</span></div>
+           <div style="margin-top:10px;padding:8px;background:var(--bg-dark);border-radius:6px;font-size:.8em">
+             ℹ️ 딥러닝 모델은 피처별 중요도 대신 시퀀스 전체 패턴을 학습합니다.<br>
+             트리 모델이 포착하지 못하는 <strong>모멘텀 연속성·변동성 레짐 전환</strong>을 보완합니다.
+           </div>
+         </div>`
+      : `<span style="color:var(--muted)">피처 중요도 데이터 없음</span>`;
     return;
   }
   const maxImp = features[0][1];
@@ -2047,8 +2109,14 @@ function renderComponentReliability(ens, formula) {
     </div>
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:16px">
       <div style="font-weight:700;margin-bottom:8px">🤖 ML 예측</div>
-      <div class="kv-row" style="font-size:.82em"><span class="kv-key">방식</span><span class="kv-val">RF · GB · LGB · CB · XGBRanker 앙상블</span></div>
-      <div class="kv-row" style="font-size:.82em"><span class="kv-key">AUC</span>
+      <div class="kv-row" style="font-size:.82em"><span class="kv-key">트리</span><span class="kv-val">RF · GB · LGB · CB · XGBRanker</span></div>
+      <div class="kv-row" style="font-size:.82em"><span class="kv-key">딥러닝</span>
+        <span class="kv-val">${ens.tcn_active
+          ? `TCN <span style="color:${aucColor(ens.tcn_test_auc)};font-weight:600">AUC ${ens.tcn_test_auc != null ? ens.tcn_test_auc.toFixed(4) : "—"}</span>`
+          : `<span style="color:var(--muted)">TCN 미학습</span>`
+        }</span>
+      </div>
+      <div class="kv-row" style="font-size:.82em"><span class="kv-key">앙상블 AUC</span>
         <span class="kv-val" style="color:${aucVal != null ? aucColor(aucVal) : "var(--muted)"}">${aucVal != null ? aucVal.toFixed(4) : "—"}</span>
       </div>
       <div class="kv-row" style="font-size:.82em"><span class="kv-key">가중치</span><span class="kv-val">${mlActive ? "35%" : "미사용"}</span></div>

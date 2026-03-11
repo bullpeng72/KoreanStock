@@ -21,6 +21,7 @@ _MODEL_CONFIGS = [
     ("lightgbm",          "LightGBM",           "lightgbm_params.json"),
     ("catboost",          "CatBoost",           "catboost_params.json"),
     ("xgboost_ranker",    "XGBoost Ranker",     "xgboost_ranker_params.json"),
+    ("tcn",               "TCN (딥러닝)",        "tcn_params.json"),
 ]
 
 _MIN_AUC_THRESHOLD = MIN_MODEL_AUC  # core/constants.py 단일 소스
@@ -65,10 +66,18 @@ def _load_model_info(name: str, label: str, filename: str) -> dict | None:
     _raw_overfit = p.get("overfit_gap")
     overfit_gap  = float(_raw_overfit) if _raw_overfit is not None else 0.0
 
+    architecture = p.get("architecture", "")  # TCN 등 딥러닝 모델 구분용
+    # Log Loss 라벨: ranker → "N/A (ranker)", TCN → "N/A (딥러닝 BCE)", 그 외 → 값
+    if test_logloss is None:
+        logloss_label = "N/A (딥러닝 BCE)" if architecture else "N/A (ranker)"
+    else:
+        logloss_label = None  # JS에서 값으로 표시
+
     return {
         "name":               name,
         "label":              label,
         "model_type":         model_type,
+        "architecture":       architecture,
         "test_auc":           test_auc,
         "train_auc":          p.get("train_auc", 0.0),
         "cv_auc_mean":        cv_mean,
@@ -76,6 +85,7 @@ def _load_model_info(name: str, label: str, filename: str) -> dict | None:
         "overfit_gap":        overfit_gap,
         "regime_gap":         round(test_auc - cv_mean, 4),
         "test_logloss":       test_logloss,
+        "logloss_label":      logloss_label,
         "quality_pass":       p.get("quality_pass", False),
         "training_samples":   p.get("training_samples", 0),
         "purging_days":       p.get("purging_days", 0),
@@ -88,22 +98,28 @@ def _load_model_info(name: str, label: str, filename: str) -> dict | None:
 
 def _compute_ensemble(models: list[dict]) -> dict:
     """앙상블 집계 및 드리프트 등급 산출."""
-    active = [m for m in models if m is not None]
-    n = len(active)
+    active    = [m for m in models if m is not None]
+    n         = len(active)
+    total_cfg = len(_MODEL_CONFIGS)   # 설정된 전체 모델 수 (파일 유무 무관)
+
     if n == 0:
         return {
-            "active_count": 0,
-            "mean_test_auc": 0.0,
-            "mean_overfit_gap": 0.0,
-            "mean_regime_gap": 0.0,
-            "all_quality_pass": False,
-            "min_auc_threshold": _MIN_AUC_THRESHOLD,
+            "active_count":       0,
+            "total_model_count":  total_cfg,
+            "tcn_active":         False,
+            "mean_test_auc":      0.0,
+            "mean_overfit_gap":   0.0,
+            "mean_regime_gap":    0.0,
+            "all_quality_pass":   False,
+            "min_auc_threshold":  _MIN_AUC_THRESHOLD,
             "days_since_training": -1,
-            "drift_level": "HIGH",
-            "drift_factors": ["모델 파일 없음"],
+            "drift_level":        "HIGH",
+            "drift_factors":      ["모델 파일 없음"],
             "retrain_recommended": True,
         }
 
+    tcn_model        = next((m for m in active if m["name"] == "tcn"), None)
+    tree_models      = [m for m in active if m["name"] != "tcn"]
     mean_test_auc    = round(sum(m["test_auc"]    for m in active) / n, 4)
     mean_overfit_gap = round(sum(m["overfit_gap"] for m in active) / n, 4)
     mean_regime_gap  = round(sum(m["regime_gap"]  for m in active) / n, 4)
@@ -142,6 +158,13 @@ def _compute_ensemble(models: list[dict]) -> dict:
 
     return {
         "active_count":       n,
+        "total_model_count":  total_cfg,
+        "tcn_active":         tcn_model is not None,
+        "tcn_test_auc":       tcn_model["test_auc"]    if tcn_model else None,
+        "tcn_cv_auc":         tcn_model["cv_auc_mean"] if tcn_model else None,
+        "tcn_overfit_gap":    tcn_model["overfit_gap"] if tcn_model else None,
+        "tcn_quality_pass":   tcn_model["quality_pass"] if tcn_model else None,
+        "tree_mean_test_auc": round(sum(m["test_auc"] for m in tree_models) / len(tree_models), 4) if tree_models else None,
         "mean_test_auc":      mean_test_auc,
         "mean_overfit_gap":   mean_overfit_gap,
         "mean_regime_gap":    mean_regime_gap,

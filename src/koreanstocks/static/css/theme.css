@@ -746,6 +746,10 @@ select option { background: var(--bg-dark); }
   margin-bottom: 4px;
 }
 
+/* 성과 추적 — 동일 종목 접힘(collapse) */
+.oc-hidden { display: none; }
+.oc-sub-row td { font-size: .88em; }
+
 /* 반응형 */
 @media (max-width: 640px) {
   .idx-grid     { grid-template-columns: 1fr 1fr; }

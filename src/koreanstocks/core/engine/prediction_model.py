@@ -12,6 +12,7 @@ from koreanstocks.core.config import config
 from koreanstocks.core.constants import MIN_MODEL_AUC
 from koreanstocks.core.engine.indicators import indicators
 from koreanstocks.core.engine.features import build_features as _build_features, BASE_FEATURE_COLS
+from koreanstocks.core.engine import tcn_model as _tcn
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,8 @@ class StockPredictionModel:
         self.params_dir = Path(config.BASE_DIR) / "models" / "saved" / "model_params"
         # 시장 지수 당일 캐시 (KS11/KQ11 별도 캐싱, 상대강도 피처용)
         self._market_cache: Dict[str, Any] = {}  # symbol → {'df': DataFrame, 'date': str}
+        # TCN 딥러닝 모델 (선택적)
+        self._tcn_loaded: Optional[dict] = None
         self._load_existing_models()
 
     def _load_existing_models(self):
@@ -127,6 +130,29 @@ class StockPredictionModel:
                 f"앙상블 가중치 softmax 정규화: "
                 + ", ".join(f"{n}={self.model_weights[n]:.4f}" for n in _names)
             )
+
+        # ── TCN 딥러닝 모델 로드 (선택적, PyTorch 필요) ────────────────────
+        if _tcn.is_available():
+            tcn_loaded = _tcn.load_tcn(self.model_dir, self.params_dir)
+            if tcn_loaded is not None:
+                meta = tcn_loaded["meta"]
+                auc  = float(meta.get("test_auc", 0.0))
+                if auc >= _MIN_MODEL_AUC:
+                    self._tcn_loaded = tcn_loaded
+                    self.model_weights["tcn"] = max(auc - _AUC_WEIGHT_FLOOR, 1e-6)
+                    cal = meta.get("calibration")
+                    if cal and len(cal) == 101:
+                        try:
+                            cal_arr = np.array(cal, dtype=float)
+                            if np.all(np.isfinite(cal_arr)) and np.all(np.diff(cal_arr) >= 0):
+                                self.calibrations["tcn"] = cal_arr.tolist()
+                        except (ValueError, TypeError):
+                            pass
+                    logger.info(f"✅ Loaded classifier: tcn (auc={auc:.4f})")
+                else:
+                    logger.warning(
+                        f"⚠️  tcn 품질 기준 미달 (test_auc={auc:.4f} < {_MIN_MODEL_AUC}) — 로드 건너뜀."
+                    )
 
 
     def _get_market_df(self, index_symbol: str = 'KS11') -> pd.DataFrame:
@@ -301,6 +327,21 @@ class StockPredictionModel:
             except Exception as e:
                 logger.debug(f"[{name}] predict failed: {e}")
                 continue
+
+        # ── TCN 추론 (분류기 버킷에 포함) ──────────────────────────────────
+        if self._tcn_loaded is not None:
+            try:
+                feat_matrix = features[feat_cols].values   # [T, F]
+                prob = _tcn.predict_proba_tcn(self._tcn_loaded, feat_matrix)
+                if prob is not None:
+                    cal = self.calibrations.get("tcn")
+                    w   = self.model_weights.get("tcn", 0.05)
+                    p   = float(np.clip(np.searchsorted(cal, prob), 0, 100)) if cal else prob * 100.0
+                    clf_sum    += p * w
+                    clf_weight += w
+                    model_count += 1
+            except Exception as e:
+                logger.debug(f"[tcn] predict failed: {e}")
 
         if model_count == 0:
             # 저장된 모델이 없을 때: tech_score 폴백
