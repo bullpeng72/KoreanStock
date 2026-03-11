@@ -1,7 +1,7 @@
 # 📈 Korean Stocks AI/ML Analysis System
 
 ![version](https://img.shields.io/badge/version-0.4.3-blue)
-![python](https://img.shields.io/badge/python-3.11-3.13-green)
+![python](https://img.shields.io/badge/python-3.11~3.13-green)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
 > **KOSPI · KOSDAQ 종목을 AI와 머신러닝으로 분석하는 자동화 투자 보조 플랫폼**

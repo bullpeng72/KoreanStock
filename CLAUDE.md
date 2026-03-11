@@ -219,6 +219,9 @@ DB_PATH=data/storage/stock_analysis.db
 - 🐛 `recommendations.py`: `GET /api/recommendations/outcomes` 호출 시 `BackgroundTasks`로 `record_outcomes()` 자동 실행 — 성과 데이터 미표시 버그 수정
 - 🔧 `dashboard.js`: 성과 탭 8초 자동 재시도 (`_isRetry` 플래그) + 🔄 수동 재시도 버튼 추가 (total=0 시)
 - 🔧 `dashboard.html`: 성과 조회 기간 버튼 30/90/180일 → 2개월/3개월/6개월 + "조회 기간:" 레이블 추가 (측정 창인 5·10·20 거래일과 혼동 방지)
+- 🐛 `outcome_tracker.py`: `_backfill_target_hit()` 추가 — `correct_20d` 완료 후 `target_hit` NULL 인 레코드 소급 처리 (기능 도입 전 레코드 대상), `record_outcomes()` 실행 시 자동 선행
+- 🔧 `theme.css`: 히트맵 4색 완전 분리 — A·B(연속 2일) 파랑 `--hm-streak-color`, Cp(과거 강연속) 보라 `--hm-cp-color` CSS 변수 도입 (보더·범례·배지 일괄 적용)
+- 🔧 `dashboard.js`: 목표가 달성률 "집계중" → "20거래일 경과 후 산출" + tooltip 설명 개선
 
 ### v0.4.2 (2026-03-10) — 경고 전면 제거 · 추천 성과 추적 안정성 강화 · 코드 품질 개선
 
