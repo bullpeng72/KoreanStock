@@ -11,6 +11,7 @@ from koreanstocks.core.config import config
 from koreanstocks.core.data.provider import data_provider
 from koreanstocks.core.engine.indicators import indicators
 from koreanstocks.core.data.database import db_manager
+from koreanstocks.core.constants import calc_composite_score
 
 logger = logging.getLogger(__name__)
 
@@ -59,32 +60,37 @@ class AnalysisAgent:
         news_res = news_agent.get_sentiment_score(name or code, stock_code=code)
         sentiment_score = float(news_res.get("sentiment_score") or 0)
 
-        # 4. ML 예측 점수 산출 (순수 ML 앙상블; sentiment 블렌딩은 composite 단계에서 일원화)
+        # 4. 시장/섹터 정보 조회 (ML predict 에 market 전달해 중복 stock_list 호출 제거)
+        stock_list   = data_provider.get_stock_list()
+        _row         = stock_list[stock_list['code'] == code] if 'code' in stock_list.columns else stock_list.iloc[0:0]
+        market_val   = str(_row.iloc[0]['market'])                 if not _row.empty else ''
+        sector_val   = str(_row.iloc[0].get('sector',   '') or '') if not _row.empty else ''
+        industry_val = str(_row.iloc[0].get('industry', '') or '') if not _row.empty else ''
+
+        # 5. ML 예측 점수 산출 (순수 ML 앙상블; sentiment 블렌딩은 composite 단계에서 일원화)
         from koreanstocks.core.engine.prediction_model import prediction_model
         ml_res = prediction_model.predict(
             code, df,
             df_with_indicators=df_with_indicators,
             fallback_score=tech_score,
+            market=market_val,   # 이미 조회한 market 전달 → predict() 내부 중복 호출 생략
         )
         ml_raw_score   = float(ml_res.get("ensemble_score") or tech_score)  # 순수 ML 앙상블 점수
         ml_model_count = int(ml_res.get("model_count") or 0)              # 활성 모델 수 (composite 가중치 분기용)
 
-        # 종합 점수 (recommendation_agent와 동일 공식)
-        _sentiment_norm = max(0.0, min(100.0, (sentiment_score + 100.0) / 2.0))
-        if ml_model_count > 0:
-            composite_score = round(tech_score * 0.40 + ml_raw_score * 0.35 + _sentiment_norm * 0.25, 1)
-        else:
-            composite_score = round(tech_score * 0.65 + _sentiment_norm * 0.35, 1)
+        # 종합 점수 (constants.calc_composite_score 단일 소스)
+        composite_score = round(calc_composite_score(
+            tech_score=tech_score,
+            ml_score=ml_raw_score,
+            sentiment_score=sentiment_score,
+            ml_model_count=ml_model_count,
+        ), 1)
 
         # 참고용: ML + 뉴스 감성 블렌딩 점수 (composite 계산에는 미사용, 표시 전용)
+        _sentiment_norm = max(0.0, min(100.0, (sentiment_score + 100.0) / 2.0))
         ml_blended = round(0.65 * ml_raw_score + 0.35 * _sentiment_norm, 2)
 
-        # 5. 시장/섹터 정보 및 지수 수집 (AI 분석 컨텍스트용)
-        stock_list = data_provider.get_stock_list()
-        _row = stock_list[stock_list['code'] == code] if 'code' in stock_list.columns else stock_list.iloc[0:0]
-        market_val   = str(_row.iloc[0]['market'])                 if not _row.empty else ''
-        sector_val   = str(_row.iloc[0].get('sector',   '') or '') if not _row.empty else ''
-        industry_val = str(_row.iloc[0].get('industry', '') or '') if not _row.empty else ''
+        # 6. 시장 지수 수집 (AI 분석 컨텍스트용)
         market_indices = data_provider.get_market_indices()
 
         # 6. AI 분석 (최근 데이터 + 순수 ML 점수 + 뉴스 점수 + 시장/섹터 맥락)

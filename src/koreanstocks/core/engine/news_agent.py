@@ -85,7 +85,7 @@ class NewsAgent:
         }
 
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 items = response.json().get('items', [])
                 result = []

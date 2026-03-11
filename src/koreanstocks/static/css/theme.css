@@ -345,13 +345,35 @@ select option { background: var(--bg-dark); }
 .hm-mid  { background: var(--hm-mid-bg);  color: var(--hm-mid-fg); }
 .hm-high { background: var(--hm-high-bg); color: var(--hm-high-fg); font-weight: 700; }
 
-.streak-badge { font-size: 0.65em; }
-.repeat-badge { font-size: 0.65em; color: var(--hold); margin-left: 2px; }
+.streak-badge     { font-size: 0.65em; color: var(--buy);  margin-left: 2px; }
+.streak-badge-em  { font-size: 0.65em; color: var(--buy);  margin-left: 2px; font-weight: 700; }
+.streak-badge-hot { font-size: 0.65em; color: #f0883e;      margin-left: 2px; font-weight: 600; }
+.repeat-badge     { font-size: 0.65em; color: var(--hold);   margin-left: 2px; }
+.repeat-badge-cp  { font-size: 0.65em; color: var(--accent); margin-left: 2px; font-weight: 700; }
+
+/* 버킷 일관성 배지 */
+.bucket-consist-badge { font-size: 0.62em; color: var(--muted); margin-left: 3px; opacity: 0.85; }
+.bucket-warn-badge    { font-size: 0.62em; color: var(--sell);  margin-left: 3px; }
+
+/* 최신 점수 인라인 표시 */
+.hm-latest-score { font-size: 0.68em; color: var(--muted); margin-left: 4px; font-variant-numeric: tabular-nums; }
+
+/* 점수 추세 화살표 */
+.score-trend-up { font-size: 0.65em; color: var(--buy);  margin-left: 3px; }
+.score-trend-dn { font-size: 0.65em; color: var(--sell); margin-left: 3px; }
 
 /* 히트맵 행 강조 — 좌측 컬러 보더로 유형 구분 */
-.hm-row-hot    td.stock-label { border-left: 3px solid var(--buy);    padding-left: 7px; }
-.hm-row-streak td.stock-label { border-left: 3px solid var(--accent); padding-left: 7px; }
-.hm-row-repeat td.stock-label { border-left: 3px solid var(--hold);   padding-left: 7px; }
+/* 연속 3일+: 주황 계열 (강렬·눈에 띔) + 행 배경 틴트 */
+.hm-row-hot    { background: rgba(240, 136, 62, 0.06); }
+.hm-row-hot    td.stock-label { border-left: 4px solid #f0883e; padding-left: 6px; font-weight: 600; }
+/* 연속 2일: 초록 계열 */
+.hm-row-streak td.stock-label { border-left: 3px solid var(--buy);  padding-left: 7px; }
+/* 비연속 반복: 노랑 계열 */
+.hm-row-repeat td.stock-label { border-left: 3px solid var(--hold); padding-left: 7px; }
+/* 과거 강연속(Cp): teal 계열 — hm-row-repeat 이후 선언으로 색상 오버라이드 */
+.hm-row-cp td.stock-label { border-left-color: var(--accent); }
+/* 이력 풍부 강조 (SS·A·Cp 등급): 보더 굵기 5px */
+.hm-row-strong td.stock-label { border-left-width: 5px; padding-left: 5px; }
 
 /* 히트맵 범례 */
 .heatmap-legend {
@@ -371,9 +393,10 @@ select option { background: var(--bg-dark); }
   margin-right: 3px;
   vertical-align: middle;
 }
-.hm-legend-hot    { background: var(--buy); }
-.hm-legend-streak { background: var(--accent); }
-.hm-legend-repeat { background: var(--hold); }
+.hm-legend-hot       { background: #f0883e; }
+.hm-legend-streak    { background: var(--buy); }
+.hm-legend-repeat-cp { background: var(--accent); }
+.hm-legend-repeat    { background: var(--hold); }
 
 /* ── Watchlist 종목 카드 ──────────────────────── */
 .wl-card {

@@ -100,15 +100,23 @@ def analysis_status():
 @router.get("/recommendations/outcomes")
 def recommendation_outcomes(
     days: int = Query(90, ge=1, le=365, description="최근 N일간"),
+    background_tasks: BackgroundTasks = None,
 ):
     """추천 결과 성과 통계 및 개별 내역 반환.
 
     stats    — 기간 내 집계 통계 (정답률, 평균 수익률, 목표가 달성률)
     outcomes — 종목별 개별 성과 목록
+
+    요청 시마다 record_outcomes()를 백그라운드로 실행해 최신 가격을 수집합니다.
+    현재 DB에 저장된 결과를 즉시 반환하며, 갱신된 데이터는 다음 조회 시 반영됩니다.
     """
     from fastapi import HTTPException
     try:
-        from koreanstocks.core.utils.outcome_tracker import get_outcome_stats, get_recent_outcomes
+        from koreanstocks.core.utils.outcome_tracker import (
+            get_outcome_stats, get_recent_outcomes, record_outcomes,
+        )
+        if background_tasks is not None:
+            background_tasks.add_task(record_outcomes)
         return {
             "stats":    get_outcome_stats(days=days),
             "outcomes": get_recent_outcomes(days=days),

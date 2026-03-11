@@ -543,19 +543,30 @@ function buildHeatmapHtml(history) {
     return `<span style="color:var(--muted);font-size:.85em">히트맵을 그릴 추천 이력이 없습니다. 추천을 여러 날 실행하면 표시됩니다.</span>`;
   }
 
-  // 날짜 목록 (오름차순)
+  // 날짜 목록 (오름차순) — 추천이 실제 실행된 세션 날짜 기준
   const dates = [...new Set(history.map(r => r.date))].sort();
 
-  // 종목별 데이터 집계
+  // 지속성 패턴을 보려면 최소 2개 날짜 필요
+  if (dates.length < 2) {
+    const d = dates[0] || "";
+    return `<span style="color:var(--muted);font-size:.85em">지속성 히트맵을 표시하려면 서로 다른 날짜의 추천이 최소 2회 필요합니다${d ? ` (현재: ${esc(d)} 1일분)` : ""}.</span>`;
+  }
+
+  // 버킷 메타
+  const BUCKET_ICON  = { volume: '📊', momentum: '🚀', rebound: '🔁' };
+  const BUCKET_LABEL = { volume: '거래량상위', momentum: '상승모멘텀', rebound: '반등후보' };
+
+  // 종목별 데이터 집계 (bucket 포함)
   const byStock = {};
   history.forEach(r => {
-    const key = r.code;
-    if (!byStock[key]) byStock[key] = { name: r.name, code: r.code, days: {} };
-    byStock[key].days[r.date] = { score: r.score, action: r.action };
+    if (!byStock[r.code]) byStock[r.code] = { name: r.name, code: r.code, days: {} };
+    byStock[r.code].days[r.date] = { score: r.score, action: r.action, bucket: r.bucket || null };
   });
 
-  // 최근 날짜부터 연속 일수
-  function streak(days_obj) {
+  // ── 지표 계산 함수 ─────────────────────────────────────────────
+
+  // 최근 날짜부터 연속 추천 일수
+  function calcStreak(days_obj) {
     let cnt = 0;
     for (let i = dates.length - 1; i >= 0; i--) {
       if (days_obj[dates[i]]) cnt++;
@@ -564,62 +575,204 @@ function buildHeatmapHtml(history) {
     return cnt;
   }
 
-  // 기간 내 총 출현 횟수
-  function freq(days_obj) {
+  // 기간 전체 최대 연속 일수 (과거 연속 이력 반영)
+  function calcMaxStreak(days_obj) {
+    let max = 0, cur = 0;
+    for (let i = 0; i < dates.length; i++) {
+      if (days_obj[dates[i]]) { cur++; max = Math.max(max, cur); }
+      else cur = 0;
+    }
+    return max;
+  }
+
+  // 기간 내 총 등장 횟수
+  function calcFreq(days_obj) {
     return Object.keys(days_obj).length;
   }
 
-  // 정렬: streak 우선 → freq 2차 (연속형이 상단, 동점이면 총 출현 많은 종목 우선)
-  const stocks = Object.values(byStock).sort((a, b) => {
-    const sa = streak(a.days), sb = streak(b.days);
-    if (sb !== sa) return sb - sa;
-    return freq(b.days) - freq(a.days);
+  // 버킷 일관성 분석
+  // consistency: 0~1 (1 = 매번 같은 버킷)
+  function calcBucketInfo(days_obj) {
+    const buckets = dates
+      .filter(d => days_obj[d] && days_obj[d].bucket)
+      .map(d => days_obj[d].bucket);
+    if (buckets.length < 2) return null;
+    const counts = {};
+    buckets.forEach(b => { counts[b] = (counts[b] || 0) + 1; });
+    const [dominant, domCnt] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+    return { dominant, consistency: domCnt / buckets.length };
+  }
+
+  // SS~D 등급 결정
+  // SS: 연속3+ && 이력4+  /  S: 연속3+  /  A: 연속2 && 이력4+
+  // B:  연속2  /  Cp: 비연속3+ && 과거최대연속3+  /  C: 비연속3+  /  D: 2회(기간≥3)
+  function calcGrade(stk, frq, maxStk) {
+    if      (stk >= 3 && frq >= 4)               return "SS";
+    else if (stk >= 3)                            return "S";
+    else if (stk >= 2 && frq >= 4)               return "A";
+    else if (stk >= 2)                            return "B";
+    else if (frq >= 3 && maxStk >= 3)             return "Cp"; // 과거 강한 연속 이력 보유
+    else if (frq >= 3)                            return "C";
+    else if (frq === 2 && dates.length >= 3)      return "D";
+    return null;
+  }
+
+  // ── 종목별 지표 사전 계산 ──────────────────────────────────────
+  const GRADE_ORDER = { SS: 7, S: 6, A: 5, B: 4, Cp: 3, C: 2, D: 1 };
+
+  // 점수 추세: 첫 등장 ~ 최근 등장 간 점수 변화 (5pt 이상만 유의미)
+  function calcScoreTrend(days_obj) {
+    const scores = dates
+      .filter(d => days_obj[d] && days_obj[d].score != null)
+      .map(d => days_obj[d].score);
+    if (scores.length < 2) return null;
+    return scores[scores.length - 1] - scores[0];
+  }
+
+  // 가장 최근 등장 날짜의 점수 (행 레이블 표시용)
+  function calcLatestScore(days_obj) {
+    for (let i = dates.length - 1; i >= 0; i--) {
+      const entry = days_obj[dates[i]];
+      if (entry && entry.score != null) return entry.score;
+    }
+    return null;
+  }
+
+  const stockMetrics = Object.values(byStock).map(s => {
+    const stk         = calcStreak(s.days);
+    const maxStk      = calcMaxStreak(s.days);
+    const frq         = calcFreq(s.days);
+    const grade       = calcGrade(stk, frq, maxStk);
+    const bucketInf   = calcBucketInfo(s.days);
+    const scoreTrend  = calcScoreTrend(s.days);
+    const latestScore = calcLatestScore(s.days);
+    return { ...s, stk, maxStk, frq, grade, bucketInf, scoreTrend, latestScore };
+  }).filter(s => s.grade !== null); // frq=1 등 지속성 없는 종목 제외
+
+  // 정렬: 등급 → 총 출현 횟수 → 최대연속 → 최신점수(내림차순) → 종목코드 (안정 정렬)
+  stockMetrics.sort((a, b) => {
+    const go = (GRADE_ORDER[b.grade] || 0) - (GRADE_ORDER[a.grade] || 0);
+    if (go !== 0) return go;
+    const fq = b.frq - a.frq;
+    if (fq !== 0) return fq;
+    const ms = b.maxStk - a.maxStk;
+    if (ms !== 0) return ms;
+    const ls = (b.latestScore ?? -Infinity) - (a.latestScore ?? -Infinity);
+    if (ls !== 0) return ls;
+    return a.code.localeCompare(b.code);
   });
 
-  // 헤더
-  const headCols = dates.map(d => `<th>${esc(d.slice(5))}</th>`).join("");
+  if (stockMetrics.length === 0) {
+    return `<span style="color:var(--muted);font-size:.85em">아직 지속 추천 종목이 없습니다. 추천이 여러 날 반복되면 패턴이 표시됩니다.</span>`;
+  }
 
-  // 행
-  const rows = stocks.map(s => {
-    const stk = streak(s.days);
-    const frq = freq(s.days);
+  // ── 헤더 ──────────────────────────────────────────────────────
+  // 다중 연도 기간이면 연도 변경 시점만 YY-MM-DD, 단일 연도면 항상 MM-DD
+  const hasMultiYear = new Set(dates.map(d => d.slice(0, 4))).size > 1;
+  const headCols = dates.map((d, i) => {
+    const year     = d.slice(0, 4);
+    const prevYear = i > 0 ? dates[i - 1].slice(0, 4) : year;
+    const label    = hasMultiYear && year !== prevYear ? d.slice(2) : d.slice(5);
+    return `<th>${esc(label)}</th>`;
+  }).join("");
 
-    // 배지 결정
-    let badgesHtml = "";
-    if (stk >= 2) {
-      // 연속형: 연속 일수 표시 + 총 출현이 streak 초과이면 총 횟수도 병기
-      const extra = frq > stk ? ` · 총 ${frq}회` : "";
-      badgesHtml = ` <span class="streak-badge">🔥${stk}일 연속${extra}</span>`;
-    } else if (frq >= 3) {
-      // 반복형: 비연속이지만 3회 이상 등장
-      badgesHtml = ` <span class="repeat-badge">🔄${frq}회 반복</span>`;
-    } else if (frq === 2 && dates.length >= 5) {
-      // 2회 등장 (5일 이상 기간에서만 표시 — 단기 기간에서는 너무 흔함)
-      badgesHtml = ` <span class="repeat-badge">📌2회</span>`;
+  // ── 행 렌더링 ─────────────────────────────────────────────────
+  const rows = stockMetrics.map(s => {
+    const { stk, maxStk, frq, grade, bucketInf, scoreTrend, latestScore } = s;
+
+    // 점수 추세 화살표 (5pt 이상 변화만 표시)
+    let trendHtml = "";
+    if (scoreTrend != null) {
+      if      (scoreTrend >  5) trendHtml = ` <span class="score-trend-up" title="점수 상승 (+${scoreTrend.toFixed(1)}pt)">▲</span>`;
+      else if (scoreTrend < -5) trendHtml = ` <span class="score-trend-dn" title="점수 하락 (${scoreTrend.toFixed(1)}pt)">▼</span>`;
     }
 
-    // 행 강조 클래스 (좌측 컬러 보더)
-    let rowClass = "";
-    if (stk >= 3)      rowClass = "hm-row-hot";
-    else if (stk >= 2) rowClass = "hm-row-streak";
-    else if (frq >= 3) rowClass = "hm-row-repeat";
+    // 등급별 배지 + 행 강조 클래스
+    let badgesHtml = "";
+    let rowClass   = "";
+    switch (grade) {
+      case "SS":
+        badgesHtml = ` <span class="streak-badge-hot">🔥${stk}일 연속 · 총${frq}회</span>`;
+        rowClass   = "hm-row-hot hm-row-strong";
+        break;
+      case "S":
+        badgesHtml = ` <span class="streak-badge-hot">🔥${stk}일 연속</span>`;
+        rowClass   = "hm-row-hot";
+        break;
+      case "A": {
+        const aMax = maxStk > stk ? ` (최대${maxStk}일)` : "";
+        badgesHtml = ` <span class="streak-badge-em">🔥${stk}일 연속 · 총${frq}회${aMax}</span>`;
+        rowClass   = "hm-row-streak hm-row-strong";
+        break;
+      }
+      case "B": {
+        const bMax = maxStk > stk ? ` (최대${maxStk}일)` : "";
+        badgesHtml = ` <span class="streak-badge">🔥${stk}일 연속${bMax}</span>`;
+        rowClass   = "hm-row-streak";
+        break;
+      }
+      case "Cp":
+        // 현재는 비연속이지만 과거 최대 N일 연속 이력 보유 (maxStk >= 3)
+        badgesHtml = ` <span class="repeat-badge-cp">🔄${frq}회 반복 (최대${maxStk}일)</span>`;
+        rowClass   = "hm-row-repeat hm-row-cp hm-row-strong";
+        break;
+      case "C":
+        badgesHtml = ` <span class="repeat-badge">🔄${frq}회 반복</span>`;
+        rowClass   = "hm-row-repeat";
+        break;
+      case "D":
+        // stk=1: 최근 세션에 재등장 / stk=0: 과거 기록만
+        badgesHtml = stk === 1
+          ? ` <span class="repeat-badge">📌재등장 (총2회)</span>`
+          : ` <span class="repeat-badge">📌2회</span>`;
+        rowClass   = "hm-row-repeat";
+        break;
+    }
 
-    const nameLabel = `${esc(s.name)} (${esc(s.code)})${badgesHtml}`;
+    // 버킷 일관성 배지
+    // - 75%+ 일관: 버킷 아이콘 + 레이블 표시
+    // - rebound가 연속 2일+ 주도: 반등 미달 경고
+    let bucketHtml = "";
+    if (bucketInf && bucketInf.consistency >= 0.75) {
+      const icon  = BUCKET_ICON[bucketInf.dominant]  || "";
+      const label = BUCKET_LABEL[bucketInf.dominant] || bucketInf.dominant;
+      if (bucketInf.dominant === "rebound" && (stk >= 2 || frq >= 3)) {
+        // 반등 후보 연속 2일+ 또는 비연속 3회+ = 반등 실패 지속 가능성 → 경고
+        bucketHtml = ` <span class="bucket-warn-badge">⚠️반등잔류</span>`;
+      } else {
+        bucketHtml = ` <span class="bucket-consist-badge">${icon}${label}</span>`;
+      }
+    }
+
+    const scoreHtml = latestScore != null
+      ? ` <span class="hm-latest-score" title="마지막 추천 점수">${Math.round(latestScore)}점</span>`
+      : "";
+    const nameLabel = `${esc(s.name)} (${esc(s.code)})${scoreHtml}${badgesHtml}${bucketHtml}${trendHtml}`;
+
+    // 셀: 점수 + 버킷 정보를 tooltip에 포함
     const cells = dates.map(d => {
       const entry = s.days[d];
-      if (!entry) return `<td class="hm-0" title="미추천">-</td>`;
-      const sc = entry.score;
-      const cls = sc != null && sc >= 70 ? "hm-high" : sc != null && sc >= 40 ? "hm-mid" : "hm-low";
-      return `<td class="${cls}" title="${esc(d)} | 점수: ${sc != null ? sc.toFixed(1) : "—"} | ${esc(entry.action)}">${sc != null ? Math.round(sc) : "—"}</td>`;
+      if (!entry) return `<td class="hm-0" title="${esc(d)} | 미추천">-</td>`;
+      const sc      = entry.score;
+      const cls     = sc != null && sc >= 70 ? "hm-high" : sc != null && sc >= 40 ? "hm-mid" : "hm-low";
+      const bLabel  = BUCKET_LABEL[entry.bucket] || entry.bucket || "—";
+      const tooltip = `${esc(d)} | 점수: ${sc != null ? sc.toFixed(1) : "—"} | ${esc(entry.action)} | ${esc(bLabel)}`;
+      return `<td class="${cls}" title="${tooltip}">${sc != null ? Math.round(sc) : "—"}</td>`;
     }).join("");
+
     return `<tr class="${rowClass}"><td class="stock-label">${nameLabel}</td>${cells}</tr>`;
   }).join("");
 
+  // ── 범례 ──────────────────────────────────────────────────────
   const legend = `
     <div class="heatmap-legend">
-      <span><span class="hm-legend-dot hm-legend-hot"></span> 연속 3일+</span>
-      <span><span class="hm-legend-dot hm-legend-streak"></span> 연속 2일</span>
-      <span><span class="hm-legend-dot hm-legend-repeat"></span> 비연속 반복</span>
+      <span><span class="hm-legend-dot hm-legend-hot"></span> 연속 3일+ (S·SS)</span>
+      <span><span class="hm-legend-dot hm-legend-streak"></span> 연속 2일 (A·B)</span>
+      <span><span class="hm-legend-dot hm-legend-repeat-cp"></span> 과거 강연속 (Cp)</span>
+      <span><span class="hm-legend-dot hm-legend-repeat"></span> 비연속 반복 (C·D)</span>
+      <span style="border-left:1px solid var(--border);padding-left:10px;margin-left:2px">
+        굵은 보더 = 이력 풍부 (SS·A·Cp) &nbsp;|&nbsp; ▲▼ 점수 추세
+      </span>
       <span style="margin-left:8px">
         <span style="background:var(--hm-high-bg);color:var(--hm-high-fg);padding:1px 6px;border-radius:3px">■ ≥70</span>
         <span style="background:var(--hm-mid-bg);color:var(--hm-mid-fg);padding:1px 6px;border-radius:3px;margin-left:4px">■ 40~69</span>
@@ -1312,10 +1465,12 @@ function renderBtResult(data, capital) {
 // Tab 3 — 추천 성과 추적 (Outcome Tracker)
 // ═══════════════════════════════════════════════════════
 
-let _outcomeDays = 90;
+let _outcomeDays = 90; // 기본값: 3개월 (dashboard.html active 버튼과 일치)
 let _outcomesAbort = null;
+let _outcomeRetryTimer = null; // 데이터 없을 때 1회 자동 재시도 타이머
 
-async function loadOutcomes(days) {
+async function loadOutcomes(days, _isRetry = false) {
+  if (_outcomeRetryTimer) { clearTimeout(_outcomeRetryTimer); _outcomeRetryTimer = null; }
   if (_outcomesAbort) { _outcomesAbort.abort(); }
   _outcomesAbort = new AbortController();
   const statsEl = document.getElementById("outcome-stats");
@@ -1325,8 +1480,15 @@ async function loadOutcomes(days) {
   statsEl.innerHTML = `<span style="color:var(--muted);font-size:.85em;grid-column:1/-1">로딩 중…</span>`;
   try {
     const data = await api(`/api/recommendations/outcomes?days=${days}`, { signal: _outcomesAbort.signal });
-    statsEl.innerHTML = _outcomeStatsHtml(data.stats);
+    statsEl.innerHTML = _outcomeStatsHtml(data.stats, _isRetry);
     if (listEl) listEl.innerHTML = _outcomeListHtml(data.outcomes);
+    // 데이터 없으면 백그라운드 수집이 완료될 때까지 1회만 자동 재시도 (8초 후)
+    if (!_isRetry && (!data.stats || data.stats.total === 0)) {
+      _outcomeRetryTimer = setTimeout(() => {
+        _outcomeRetryTimer = null;
+        loadOutcomes(days, true);
+      }, 8000);
+    }
   } catch (e) {
     if (e.name === "AbortError") return;
     statsEl.className = "";
@@ -1335,11 +1497,17 @@ async function loadOutcomes(days) {
   }
 }
 
-function _outcomeStatsHtml(stats) {
+function _outcomeStatsHtml(stats, isRetry = false) {
   if (!stats || stats.total === 0) {
+    const retryMsg = isRetry
+      ? `<br><span style="color:var(--muted)">아직 수집 중이거나 해당 기간 데이터가 없습니다.</span>`
+      : `<br><span style="color:var(--muted)">성과 데이터를 수집하는 중입니다. 잠시 후 자동으로 갱신됩니다…</span>`;
     return `<div style="color:var(--muted);font-size:.88em;grid-column:1/-1;padding:6px 0">
       아직 집계된 성과 데이터가 없습니다.
       추천 후 <strong>5거래일(약 1주일)</strong>이 지나면 자동으로 수집됩니다.
+      ${retryMsg}
+      <br><button class="btn btn-secondary btn-sm" style="margin-top:8px"
+        onclick="loadOutcomes(_outcomeDays)">🔄 새로고침</button>
     </div>`;
   }
 
@@ -1362,20 +1530,30 @@ function _outcomeStatsHtml(stats) {
 
   const thr = stats.target_hit_rate;
   const thrCard = thr != null
-    ? `<div class="result-card">
+    ? `<div class="result-card" title="20거래일 이내 장중 고가(BUY)/저가(SELL) 기준으로 목표가 도달 여부를 판정합니다">
         <div class="rc-label">🎯 목표가 달성률</div>
         <div class="rc-val ${thr >= 50 ? "pos" : "neg"}">${thr.toFixed(0)}%</div>
-        <div class="rc-delta" style="color:var(--muted)">20거래일 이내</div>
+        <div class="rc-delta" style="color:var(--muted)">20거래일 내 장중 기준</div>
       </div>`
-    : `<div class="result-card">
+    : `<div class="result-card" title="20거래일 이내 장중 고가(BUY)/저가(SELL) 기준으로 목표가 도달 여부를 판정합니다">
         <div class="rc-label">🎯 목표가 달성률</div>
         <div class="rc-val" style="color:var(--muted)">—</div>
         <div class="rc-delta" style="color:var(--muted)">집계중</div>
       </div>`;
 
-  return statCard(" 5거래일 정답률", stats.evaluated_5d,  stats.win_rate_5d,  stats.avg_return_5d)
-       + statCard("10거래일 정답률", stats.evaluated_10d, stats.win_rate_10d, stats.avg_return_10d)
-       + statCard("20거래일 정답률", stats.evaluated_20d, stats.win_rate_20d, stats.avg_return_20d)
+  // 정답률 카드: title에 측정 기준 명시 (statCard 래퍼로 title 전달)
+  function statCardTitled(label, ev, wr, ret, title) {
+    return statCard(label, ev, wr, ret).replace(
+      `<div class="result-card">`,
+      `<div class="result-card" title="${esc(title)}">`
+    );
+  }
+  const hint5  = "추천 다음날부터 5번째 거래일 종가 기준. BUY→수익/SELL→손실이면 정답";
+  const hint10 = "추천 다음날부터 10번째 거래일 종가 기준. BUY→수익/SELL→손실이면 정답";
+  const hint20 = "추천 다음날부터 20번째 거래일 종가 기준. BUY→수익/SELL→손실이면 정답";
+  return statCardTitled(" 5거래일 정답률", stats.evaluated_5d,  stats.win_rate_5d,  stats.avg_return_5d,  hint5)
+       + statCardTitled("10거래일 정답률", stats.evaluated_10d, stats.win_rate_10d, stats.avg_return_10d, hint10)
+       + statCardTitled("20거래일 정답률", stats.evaluated_20d, stats.win_rate_20d, stats.avg_return_20d, hint20)
        + thrCard;
 }
 
@@ -1411,11 +1589,11 @@ function _outcomeListHtml(outcomes) {
       <th style="text-align:left">날짜</th>
       <th style="text-align:left">종목</th>
       <th style="text-align:left">액션</th>
-      <th>진입가</th>
-      <th>5거래일 수익률</th>
-      <th>10거래일 수익률</th>
-      <th>20거래일 수익률</th>
-      <th>AI 목표가</th>
+      <th title="추천 당일 종가 (GitHub Actions 장 마감 후 실행 기준)">진입가 (추천일 종가)</th>
+      <th title="추천 다음날부터 5번째 거래일 종가 기준 수익률">5거래일 수익률</th>
+      <th title="추천 다음날부터 10번째 거래일 종가 기준 수익률">10거래일 수익률</th>
+      <th title="추천 다음날부터 20번째 거래일 종가 기준 수익률">20거래일 수익률</th>
+      <th title="GPT가 제시한 목표가. 20거래일 내 장중 고가(BUY)/저가(SELL) 도달 시 달성">AI 목표가</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
@@ -1429,7 +1607,7 @@ function initOutcomeDaysBtns() {
       container.querySelectorAll(".theme-btn").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
       _outcomeDays = parseInt(btn.dataset.days, 10);
-      loadOutcomes(_outcomeDays);
+      loadOutcomes(_outcomeDays); // _isRetry=false → 자동 재시도 다시 허용
     });
   });
 }
@@ -1622,15 +1800,6 @@ async function loadModelHealth() {
   try {
     const data = await api("/api/model_health");
     wrap.innerHTML = "";
-    const refreshBtn = document.createElement("button");
-    refreshBtn.textContent = "🔄 새로고침";
-    refreshBtn.className = "btn-secondary";
-    refreshBtn.style.cssText = "margin-bottom:12px;font-size:.82em;padding:4px 10px";
-    refreshBtn.onclick = () => {
-      _modelHealthLoaded = false;
-      loadModelHealth().then(() => { _modelHealthLoaded = true; });
-    };
-    wrap.appendChild(refreshBtn);
     if (!data.ensemble || !data.models) {
       const msg = document.createElement("p");
       msg.style.color = "var(--muted)";
@@ -1642,6 +1811,11 @@ async function loadModelHealth() {
     wrap.appendChild(renderModelCards(data.models));
     wrap.appendChild(renderFeatureSection(data.models));
     wrap.appendChild(renderComponentReliability(data.ensemble, data.scoring_formula));
+    // 안내: 모델 데이터는 재학습 시에만 갱신되므로 페이지 새로고침으로 확인
+    const note = document.createElement("p");
+    note.style.cssText = "margin-top:16px;font-size:.82em;color:var(--muted)";
+    note.textContent = "ℹ️ 모델 재학습(koreanstocks train) 후 페이지를 새로고침하면 최신 정보가 반영됩니다.";
+    wrap.appendChild(note);
   } catch (e) {
     wrap.innerHTML = `<p style="color:var(--sell)">모델 정보를 불러올 수 없습니다: ${esc(e.message)}</p>`;
   }

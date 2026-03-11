@@ -28,7 +28,7 @@ from koreanstocks.core.config import config
 from koreanstocks.core.constants import MIN_MODEL_AUC
 from koreanstocks.core.data.provider import data_provider
 from koreanstocks.core.engine.indicators import indicators
-from koreanstocks.core.engine.features import build_features
+from koreanstocks.core.engine.features import build_features, BASE_FEATURE_COLS
 
 logger = logging.getLogger("koreanstocks.trainer")
 
@@ -289,35 +289,8 @@ MODEL_CONFIGS: Dict[str, dict] = {
     },
 }
 
-BASE_FEATURE_COLS = [
-    # ── 변동성 / 추세 강도 ────────────────────────────────────
-    'atr_ratio',            # rolling 60일 percentile (레짐 독립)
-    'adx',                  # 추세 강도 (방향 무관)
-    'bb_width',             # 볼린저 밴드 폭 (변동성 압축 감지)
-    'bb_position',          # BB 내 가격 위치 (0=하단, 1=상단)
-    # ── 중기 모멘텀 / 상대강도 ────────────────────────────────
-    'rs_vs_mkt_3m',         # KOSPI 대비 3개월 초과수익
-    'high_52w_ratio',       # 52주 고가 대비 현재가 (추세 위치)
-    'mom_accel',            # 모멘텀 가속도 (1m - 3m/3)
-    # ── 추세 / 가격 모멘텀 ────────────────────────────────────
-    'macd_diff',            # MACD 다이버전스 (추세 전환)
-    'macd_slope_5d',        # MACD 다이버전스 5일 기울기 (모멘텀 가속)
-    'price_sma_5_ratio',    # 단기 추세 (가격/SMA5)
-    # ── 반전/패턴 신호 ────────────────────────────────────────
-    'fisher',               # Fisher Transform (극값=반전)
-    'bullish_fractal_5d',   # Williams 강세 프랙탈 5일
-    # ── 거래량 방향성 ─────────────────────────────────────────
-    'mfi',                  # Money Flow Index (가격+거래량 통합)
-    'vzo',                  # Volume Zone Oscillator
-    'obv_trend',            # OBV 10일 모멘텀 (거래량 추세 가속/감속)
-    'low_52w_ratio',        # 52주 저가 대비 현재가 (반등 위치)
-    # ── 극값 감지 / 반전 신호 ──────────────────────────────────
-    'rsi',                  # RSI 정규화 (0~1), 과매도/과매수 극값 보존
-    'cci_pct',              # CCI rolling 20일 percentile (레짐 독립적 0~1)
-    # ── 거시경제 ──────────────────────────────────────────────
-    'vix_level',            # VIX 공포지수
-    'sp500_1m',             # S&P500 1개월 수익률
-]  # 20개 피처 (추가: obv_trend, rsi, cci_pct / 제거: vix_change_5d)
+# BASE_FEATURE_COLS 는 features.py 에서 import (단일 소스, 중복 정의 제거)
+# 변경 시 features.py 만 수정하면 학습/추론 양쪽 자동 반영됨
 
 MIN_STOCKS_PER_DATE = 5
 

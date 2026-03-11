@@ -4,9 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "koreanstocks"
-version = "0.4.2"
+version = "0.4.3"
 description = "KOSPI·KOSDAQ 종목 자동 스크리닝 + AI/ML 분석 + 텔레그램 리포트 플랫폼"
-readme = "README.md"
+# PyPI용 README (mermaid 제거 버전). GitHub 표시용은 README.md 를 사용.
+readme = {file = "README_PYPI.md", content-type = "text/markdown; charset=UTF-8"}
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -17,6 +18,7 @@ keywords = [
     "korean-stocks", "kospi", "kosdaq", "stock-screening",
     "technical-analysis", "machine-learning", "sentiment-analysis",
     "fastapi", "telegram", "finance", "investment",
+    "piotroski", "value-investing", "quality-investing",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -28,6 +30,8 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
+    "Framework :: FastAPI",
+    "Natural Language :: Korean",
 ]
 dependencies = [
     "fastapi>=0.110",
@@ -73,6 +77,7 @@ dev = [
 Homepage = "https://github.com/bullpeng72/KoreanStock"
 Repository = "https://github.com/bullpeng72/KoreanStock"
 "Bug Tracker" = "https://github.com/bullpeng72/KoreanStock/issues"
+Changelog = "https://github.com/bullpeng72/KoreanStock/blob/main/README.md#-변경-이력"
 
 [project.scripts]
 koreanstocks = "koreanstocks.cli:app"

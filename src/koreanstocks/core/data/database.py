@@ -310,7 +310,8 @@ class DatabaseManager:
             cursor.execute('''
                 SELECT r.code,
                        COALESCE(s.name, json_extract(r.detail_json, '$.name'), r.code) AS name,
-                       r.score, r.type, r.session_date
+                       r.score, r.type, r.session_date,
+                       json_extract(r.detail_json, '$.bucket') AS bucket
                 FROM recommendations r
                 LEFT JOIN stocks s ON r.code = s.code
                 WHERE r.session_date IS NOT NULL
@@ -319,7 +320,7 @@ class DatabaseManager:
             ''', (f'-{days} days',))
             rows = cursor.fetchall()
         return [
-            {'code': r[0], 'name': r[1], 'score': r[2], 'action': r[3], 'date': r[4]}
+            {'code': r[0], 'name': r[1], 'score': r[2], 'action': r[3], 'date': r[4], 'bucket': r[5]}
             for r in rows
         ]
 

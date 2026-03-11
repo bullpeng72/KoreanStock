@@ -11,22 +11,14 @@ import json
 from koreanstocks.core.config import config
 from koreanstocks.core.constants import MIN_MODEL_AUC
 from koreanstocks.core.engine.indicators import indicators
-from koreanstocks.core.engine.features import build_features as _build_features
+from koreanstocks.core.engine.features import build_features as _build_features, BASE_FEATURE_COLS
 
 logger = logging.getLogger(__name__)
 
-# 예측 시 사용할 피처 목록 — trainer.py BASE_FEATURE_COLS와 동기화 필수 (20개)
-_FEATURE_COLS = [
-    'atr_ratio', 'adx', 'bb_width', 'bb_position',
-    'rs_vs_mkt_3m', 'high_52w_ratio', 'mom_accel',
-    'macd_diff', 'macd_slope_5d', 'price_sma_5_ratio',
-    'fisher', 'bullish_fractal_5d',
-    'mfi', 'vzo', 'obv_trend', 'low_52w_ratio',
-    'rsi', 'cci_pct',
-    'vix_level', 'sp500_1m',
-]
-# 구버전(22/34/37/23/25/18/17) 구분용 문서 상수 (코드 로직에서는 _FEATURE_COLS 컬럼명 선택 사용)
-_BASE_FEATURE_COUNT = 20
+# 피처 목록 단일 소스는 features.BASE_FEATURE_COLS (중복 정의 제거)
+_FEATURE_COLS = BASE_FEATURE_COLS
+# 구버전(22/34/37/23/25/18/17) 구분용 문서 상수
+_BASE_FEATURE_COUNT = len(BASE_FEATURE_COLS)
 # AUC 가중치 하한선: AUC 기반 가중치 = (AUC - 0.5) / 상수
 # AUC=0.55 → weight=0.05, AUC=0.60 → weight=0.10 (최대 2배 차이 허용)
 _AUC_WEIGHT_FLOOR = 0.50   # AUC - 0.5가 이 값 이하면 weight=0 처리
@@ -86,10 +78,17 @@ class StockPredictionModel:
                                 continue
                             # AUC 기반 가중치: (AUC - 0.5) 에 비례
                             self.model_weights[name] = max(auc - _AUC_WEIGHT_FLOOR, 1e-6)
-                            # 캘리브레이션 배열 로드 (101분위수)
+                            # 캘리브레이션 배열 로드 (101분위수) — 타입·범위·단조증가 검증
                             cal = meta.get("calibration")
                             if cal and len(cal) == 101:
-                                self.calibrations[name] = cal
+                                try:
+                                    cal_arr = np.array(cal, dtype=float)
+                                    if np.all(np.isfinite(cal_arr)) and np.all(np.diff(cal_arr) >= 0):
+                                        self.calibrations[name] = cal_arr.tolist()
+                                    else:
+                                        logger.warning(f"⚠️  {name} calibration 배열 손상 (NaN/Inf 또는 단조 감소) — 캘리브레이션 비활성화")
+                                except (ValueError, TypeError) as _cal_err:
+                                    logger.warning(f"⚠️  {name} calibration 파싱 실패: {_cal_err} — 비활성화")
                             label = "ranker" if model_type == "ranker" else "classifier"
                             logger.info(f"✅ Loaded {label}: {name} (auc={auc:.4f}, weight={self.model_weights[name]:.4f})")
                         else:
@@ -222,24 +221,31 @@ class StockPredictionModel:
 
     def predict(self, code: str, df: pd.DataFrame,
                 df_with_indicators: pd.DataFrame = None,
-                fallback_score: float = None) -> Dict[str, Any]:
+                fallback_score: float = None,
+                market: str = '') -> Dict[str, Any]:
         """앙상블 예측 수행. 순수 ML 점수만 반환 (sentiment 블렌딩은 호출 측에서 처리).
 
         Parameters
         ----------
         df_with_indicators : 이미 지표가 계산된 DataFrame (전달 시 재계산 생략)
         fallback_score     : ML 모델 없을 때 대체할 tech_score
+        market             : 'KOSDAQ' 이면 KQ11, 그 외 KS11 벤치마크 사용.
+                             호출 측에서 전달하면 내부 get_stock_list() 중복 호출 생략.
         """
         # 종목 시장에 맞는 벤치마크 지수 선택 (KOSDAQ → KQ11, 그 외 → KS11)
-        index_symbol = 'KS11'
-        try:
-            from koreanstocks.core.data.provider import data_provider as _dp
-            stock_list = _dp.get_stock_list()
-            matched = stock_list[stock_list['code'] == code]
-            if not matched.empty and matched.iloc[0].get('market') == 'KOSDAQ':
-                index_symbol = 'KQ11'
-        except Exception:
-            pass
+        if market:
+            index_symbol = 'KQ11' if market == 'KOSDAQ' else 'KS11'
+        else:
+            # market 미전달 시 stock_list 조회로 시장 탐지 (하위 호환)
+            index_symbol = 'KS11'
+            try:
+                from koreanstocks.core.data.provider import data_provider as _dp
+                _sl = _dp.get_stock_list()
+                matched = _sl[_sl['code'] == code]
+                if not matched.empty and matched.iloc[0].get('market') == 'KOSDAQ':
+                    index_symbol = 'KQ11'
+            except Exception:
+                pass
         market_df = self._get_market_df(index_symbol)
         macro_df  = self._get_macro_df()
         if df_with_indicators is not None:
@@ -250,7 +256,17 @@ class StockPredictionModel:
             return {"error": "Insufficient data for ML prediction"}
 
         # _FEATURE_COLS 순서로 피처 선택 (학습 시 FEATURE_COLS와 동일 순서)
-        feat_cols = [c for c in _FEATURE_COLS if c in features.columns]
+        missing_cols = [c for c in _FEATURE_COLS if c not in features.columns]
+        if missing_cols:
+            logger.warning(
+                f"[{code}] 피처 {len(missing_cols)}개 누락 ({missing_cols}). "
+                f"finta 미설치 또는 지표 계산 실패 → tech_score 폴백"
+            )
+            if fallback_score is not None:
+                score = round(float(np.clip(fallback_score, 0.0, 100.0)), 2)
+                return {"ensemble_score": score, "model_count": 0, "note": "fallback_missing_features"}
+            return {"error": f"Missing features: {missing_cols}"}
+        feat_cols = _FEATURE_COLS
         latest_x = features[feat_cols].iloc[-1:]  # DataFrame (1, n_features) — feature names 보존
 
         # ── 분류기 / 랜커 분리 앙상블 ───────────────────────────────────────

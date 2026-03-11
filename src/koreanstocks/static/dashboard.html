@@ -207,15 +207,18 @@
       <div class="flex-row" style="margin-bottom:8px">
         <div class="card-title" style="margin:0">📊 추천 성과 추적</div>
         <div class="spacer"></div>
-        <div class="theme-filter" style="margin:0" id="outcome-days-filter">
-          <button class="theme-btn" data-days="30">30일</button>
-          <button class="theme-btn active" data-days="90">90일</button>
-          <button class="theme-btn" data-days="180">180일</button>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:.78em;color:var(--muted)">조회 기간:</span>
+          <div class="theme-filter" style="margin:0" id="outcome-days-filter">
+            <button class="theme-btn" data-days="60">2개월</button>
+            <button class="theme-btn active" data-days="90">3개월</button>
+            <button class="theme-btn" data-days="180">6개월</button>
+          </div>
         </div>
       </div>
       <p style="color:var(--muted);font-size:.85em;margin:0 0 12px">
-        추천 후 5·10·20 거래일의 실제 주가로 AI 추천 정확도를 측정합니다.
-        BUY→수익, SELL→손실이면 정답입니다. 거래일 기준이므로 약 1주·2주·4주에 해당합니다.
+        <strong>진입가</strong>는 추천 당일 종가 기준이며, 추천 다음 거래일부터 5·10·20번째 거래일의 <strong>종가</strong>로 수익률을 측정합니다 (약 1주·2주·4주).
+        BUY→수익, SELL→손실이면 정답. <strong>AI 목표가 달성</strong>은 20거래일 이내 장중 고가(BUY)/저가(SELL) 기준입니다.
       </p>
       <!-- 통계 요약 카드 4개 -->
       <div id="outcome-stats" class="result-grid">
@@ -862,6 +865,6 @@
 
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
-<script src="/static/js/dashboard.js?v=8"></script>
+<script src="/static/js/dashboard.js?v=22"></script>
 </body>
 </html>

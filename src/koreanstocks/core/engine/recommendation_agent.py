@@ -8,41 +8,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as
 from koreanstocks.core.data.provider import data_provider
 from koreanstocks.core.engine.analysis_agent import analysis_agent
 from koreanstocks.core.data.database import db_manager
-from koreanstocks.core.constants import BUCKET_DEFAULT, BUCKET_LABELS, BUCKET_RATIOS as _BUCKET_RATIOS
+from koreanstocks.core.constants import (
+    BUCKET_DEFAULT, BUCKET_LABELS, BUCKET_RATIOS as _BUCKET_RATIOS,
+    calc_composite_score_from_dict,
+)
 
 logger = logging.getLogger(__name__)
 
-
-def _composite_score(x: Dict[str, Any]) -> float:
-    """3-way 가중합 composite 점수 산출.
-
-    ML 모델 활성 여부에 따라 가중치를 동적으로 조정:
-      - 모델 있음: tech 0.40 + ml 0.35 + sentiment 0.25
-      - 모델 없음 (fallback): tech 0.65 + sentiment 0.35
-        (ML이 tech_score 복사본이면 이중 가중을 피하기 위해 ml 제외)
-    sorted() key 함수로 사용되므로 예외 시 0.0 반환.
-    """
-    try:
-        _ss = x.get('sentiment_score')
-        sentiment_raw  = float(_ss) if _ss is not None else 0.0
-        sentiment_norm = max(0.0, min(100.0, (sentiment_raw + 100.0) / 2.0))
-        _mc = x.get('ml_model_count')
-        ml_count  = int(_mc) if _mc is not None else 0
-        _ts = x.get('tech_score')
-        _ms = x.get('ml_score')
-        tech_score = float(_ts) if _ts is not None else 50.0
-        ml_score   = float(_ms) if _ms is not None else 50.0
-
-        if ml_count == 0:
-            return tech_score * 0.65 + sentiment_norm * 0.35
-        return (
-            tech_score  * 0.40
-            + ml_score  * 0.35
-            + sentiment_norm * 0.25
-        )
-    except (TypeError, ValueError) as e:
-        logger.debug(f"_composite_score 계산 오류 (code={x.get('code', '?')}): {e}")
-        return 0.0
+# 하위 호환 alias (버킷 쿼터 정렬·최종 점수 계산에 사용)
+_composite_score = calc_composite_score_from_dict
 
 
 def _apply_bucket_quota(
@@ -241,24 +215,34 @@ class RecommendationAgent:
             candidates.append((code, nm))
 
         # ── 3. 병렬 분석 ────────────────────────────────────────────
+        # as_completed(timeout) 으로 전체 글로벌 타임아웃 제한.
+        # result(timeout=60) 은 as_completed 가 이미 완료된 future 를 yield 하므로
+        # 개별 타임아웃 효과가 없다 → 글로벌 timeout 이 실질적 한계.
+        # 종목 수 × 단종목 소요 추정(30s) / workers + 여유 = max(120, n*3) 초
+        _global_timeout = max(120, len(candidates) * 3)
         results: List[Dict[str, Any]] = []
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = {
                 executor.submit(self._analyze_candidate, code, nm): code
                 for code, nm in candidates
             }
-            for future in as_completed(futures):
-                code = futures[future]
-                try:
-                    res = future.result(timeout=60)
-                    if res is not None:
-                        res['bucket'] = code_bucket.get(code, BUCKET_DEFAULT)
-                        results.append(res)
-                except FuturesTimeoutError:
-                    future.cancel()
-                    logger.warning(f"Analysis timeout: {code}, skipping")
-                except Exception as e:
-                    logger.warning(f"Analysis error for {code}: {e}")
+            try:
+                for future in as_completed(futures, timeout=_global_timeout):
+                    code = futures[future]
+                    try:
+                        res = future.result()
+                        if res is not None:
+                            res['bucket'] = code_bucket.get(code, BUCKET_DEFAULT)
+                            results.append(res)
+                    except Exception as e:
+                        logger.warning(f"Analysis error for {code}: {e}")
+            except FuturesTimeoutError:
+                done   = [futures[f] for f in futures if f.done()]
+                hung   = [futures[f] for f in futures if not f.done()]
+                logger.warning(
+                    f"분석 글로벌 타임아웃 ({_global_timeout}s): "
+                    f"{len(done)}/{len(candidates)}개 완료 — 미완료 {len(hung)}개 건너뜀: {hung}"
+                )
 
         if not results:
             logger.warning("No successful analyses to recommend.")

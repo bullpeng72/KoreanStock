@@ -142,7 +142,7 @@ class IndicatorCalculator:
         구성 (최대 100pt):
           추세 (40pt)  : 단기SMA + 중기SMA60 + MACD
           모멘텀 (30pt): RSI 구간별 차등 (추세 맥락 반영, BB폭으로 신뢰도 보정)
-          위치+거래량 (30pt): BB 위치(25pt) + 거래량 확인(5pt)
+          위치+거래량 (30pt): BB 위치(20pt) + CMF 자금흐름(5pt) + 거래량 확인(5pt)
         """
         if df.empty or 'rsi' not in df.columns:
             return 50.0

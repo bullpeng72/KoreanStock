@@ -36,9 +36,10 @@ class TelegramNotifier:
             response.raise_for_status()
             logger.info("Telegram message sent successfully.")
         except Exception as e:
-            # Markdown 오류 시 일반 텍스트로 재시도 (재귀 방지: parse_mode=None이면 재시도 안 함)
-            if "400" in str(e) and parse_mode == "Markdown":
-                logger.warning("Markdown failed, retrying with plain text...")
+            # Markdown/HTML 파싱 오류(400) 시 일반 텍스트로 재시도
+            # (재귀 방지: parse_mode=None이면 재시도 안 함)
+            if "400" in str(e) and parse_mode in ("Markdown", "HTML"):
+                logger.warning(f"{parse_mode} parse failed, retrying with plain text...")
                 try:
                     plain_data = {"chat_id": self.chat_id, "text": message}
                     requests.post(url, data=plain_data).raise_for_status()
