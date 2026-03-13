@@ -1932,7 +1932,7 @@ async function loadModelHealth() {
       return;
     }
     wrap.appendChild(renderEnsembleSummary(data.ensemble));
-    wrap.appendChild(renderModelCards(data.models));
+    wrap.appendChild(renderModelCards(data.models, data.ensemble));
     wrap.appendChild(renderFeatureSection(data.models));
     wrap.appendChild(renderComponentReliability(data.ensemble, data.scoring_formula));
     // 안내: 모델 데이터는 재학습 시에만 갱신되므로 페이지 새로고침으로 확인
@@ -2011,7 +2011,135 @@ function renderEnsembleSummary(ens) {
   return card;
 }
 
-function renderModelCards(models) {
+function _buildImprovements(models, ensemble) {
+  /* 모델 데이터를 분석해 우선순위별 향상 방안 배열 반환.
+     각 항목: { level: "high"|"medium"|"low", title, desc, action } */
+  const items = [];
+  const treeModels = models.filter(m => m.name !== "tcn");
+  const tcn        = models.find(m => m.name === "tcn");
+
+  // 1. 트리 모델 개별 과적합 갭 점검
+  treeModels.forEach(m => {
+    if (m.overfit_gap > 0.10) {
+      items.push({
+        level: "high",
+        title: `${m.label} 과적합 갭 초과`,
+        desc:  `현재 갭 ${m.overfit_gap.toFixed(4)} > 임계 0.10`,
+        action: m.name === "random_forest"
+          ? "max_depth 추가 축소(3) 또는 ExtraTreesClassifier 교체 검토"
+          : "정규화 파라미터 강화 후 재학습",
+      });
+    }
+  });
+
+  // 2. 레짐 갭 (test_auc - cv_auc 평균 괴리)
+  if (ensemble.mean_regime_gap > 0.10) {
+    items.push({
+      level: "high",
+      title: "레짐 갭 과다",
+      desc:  `test AUC vs CV AUC 평균 갭 ${ensemble.mean_regime_gap.toFixed(4)} > 0.10 — 특정 시장 레짐 편향 가능성`,
+      action: "Walk-Forward CV 윈도우 확장 또는 레짐 인식 피처(VIX 레짐 원-핫 등) 추가",
+    });
+  } else if (ensemble.mean_regime_gap > 0.07) {
+    items.push({
+      level: "medium",
+      title: "레짐 갭 주의",
+      desc:  `테스트 기간 레짐 편향 가능성 (갭 ${ensemble.mean_regime_gap.toFixed(4)})`,
+      action: "학습 기간 2y → 3y 확장으로 다양한 시장 레짐 커버",
+    });
+  }
+
+  // 3. CV AUC 불안정 (std > 0.05)
+  treeModels.forEach(m => {
+    if (m.cv_auc_std != null && m.cv_auc_std > 0.05) {
+      items.push({
+        level: "medium",
+        title: `${m.label} CV 불안정`,
+        desc:  `CV AUC std ${m.cv_auc_std.toFixed(4)} > 0.05 — fold 간 성능 편차 큼`,
+        action: "정규화 강화 또는 Walk-Forward fold 수 축소로 안정성 개선",
+      });
+    }
+  });
+
+  // 4. 재학습 권고 (30일 초과)
+  if (ensemble.days_since_training > 30) {
+    items.push({
+      level: "high",
+      title: "재학습 필요",
+      desc:  `마지막 학습 ${ensemble.days_since_training}일 경과 (권장: 30일 이내)`,
+      action: "koreanstocks train 실행 — 최신 시장 데이터로 재학습",
+    });
+  } else if (ensemble.days_since_training > 14) {
+    items.push({
+      level: "medium",
+      title: "재학습 권장",
+      desc:  `마지막 학습 ${ensemble.days_since_training}일 경과 (권장: 14일 이내)`,
+      action: "koreanstocks train 실행",
+    });
+  }
+
+  // 5. 평균 Test AUC 낮음
+  if (ensemble.mean_test_auc < 0.58) {
+    items.push({
+      level: "medium",
+      title: "앙상블 AUC 개선 여지",
+      desc:  `평균 Test AUC ${ensemble.mean_test_auc.toFixed(4)} < 0.58`,
+      action: "중요도 하위 피처 제거 후 재학습 — 또는 레짐별 별도 모델 검토",
+    });
+  }
+
+  // 6. TCN 비활성
+  if (!ensemble.tcn_active) {
+    items.push({
+      level: "medium",
+      title: "TCN 비활성",
+      desc:  "PyTorch 미설치로 딥러닝 앙상블 제외됨",
+      action: "pip install 'koreanstocks[dl]' 후 koreanstocks train 재실행",
+    });
+  }
+
+  // 7. 전체 양호 시
+  if (items.length === 0) {
+    items.push({
+      level: "low",
+      title: "현재 앙상블 상태 양호",
+      desc:  "모든 지표가 권장 범위 이내입니다.",
+      action: "정기 재학습(14~30일 주기)으로 현 상태 유지",
+    });
+  }
+
+  // 우선순위 정렬: high → medium → low
+  const order = { high: 0, medium: 1, low: 2 };
+  return items.sort((a, b) => order[a.level] - order[b.level]);
+}
+
+function renderImprovementCard(models, ensemble) {
+  const items = _buildImprovements(models, ensemble);
+  const levelIcon  = { high: "🔴", medium: "🟡", low: "🟢" };
+  const levelColor = { high: "var(--sell)", medium: "var(--hold)", low: "var(--buy)" };
+  const levelLabel = { high: "즉시 조치", medium: "권장", low: "양호" };
+
+  const card = document.createElement("div");
+  card.style.cssText = "background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:16px";
+
+  const rows = items.map(it => `
+    <div style="margin-bottom:12px;padding:10px;background:var(--bg-dark);border-radius:7px;border-left:3px solid ${levelColor[it.level]}">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        <span>${levelIcon[it.level]}</span>
+        <span style="font-weight:700;font-size:.85em">${esc(it.title)}</span>
+        <span style="margin-left:auto;font-size:.73em;padding:1px 6px;border-radius:3px;background:${levelColor[it.level]}22;color:${levelColor[it.level]};border:1px solid ${levelColor[it.level]}55">${levelLabel[it.level]}</span>
+      </div>
+      <div style="font-size:.78em;color:var(--muted);margin-bottom:4px">${esc(it.desc)}</div>
+      <div style="font-size:.78em;color:var(--text)">▶ ${esc(it.action)}</div>
+    </div>`).join("");
+
+  card.innerHTML = `
+    <div style="font-weight:700;font-size:.95em;margin-bottom:12px">🎯 신뢰도 향상 방안</div>
+    ${rows}`;
+  return card;
+}
+
+function renderModelCards(models, ensemble) {
   const wrap = document.createElement("div");
   wrap.className = "card";
   wrap.innerHTML = `<div class="card-title">📊 개별 모델 상세</div>`;
@@ -2104,6 +2232,7 @@ function renderModelCards(models) {
     grid.appendChild(card);
   });
 
+  grid.appendChild(renderImprovementCard(models, ensemble));
   wrap.appendChild(grid);
   return wrap;
 }
