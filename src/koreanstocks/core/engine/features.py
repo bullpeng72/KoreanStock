@@ -76,6 +76,10 @@ def build_features(
     if df.empty:
         return df
 
+    # 중복 날짜 제거 — yfinance/FDR이 당일 데이터를 중복 반환할 때 방어
+    if df.index.duplicated().any():
+        df = df[~df.index.duplicated(keep='last')]
+
     feat = pd.DataFrame(index=df.index)
     tdy  = config.TRADING_DAYS_PER_YEAR   # 252거래일
 
