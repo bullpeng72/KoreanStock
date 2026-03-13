@@ -1,6 +1,6 @@
 # 📈 Korean Stocks AI/ML Analysis System
 
-![version](https://img.shields.io/badge/version-0.4.6-blue)
+![version](https://img.shields.io/badge/version-0.5.0-blue)
 ![python](https://img.shields.io/badge/python-3.11~3.13-green)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
@@ -687,7 +687,7 @@ KoreanStocks/
 ├── train_models.py                      # ML 모델 재학습 스크립트
 ├── src/
 │   └── koreanstocks/
-│       ├── __init__.py                  # VERSION = "0.4.6"
+│       ├── __init__.py                  # VERSION = "0.5.0"
 │       ├── cli.py                       # Typer CLI (10개 명령어)
 │       ├── api/
 │       │   ├── app.py                   # FastAPI 앱 팩토리
@@ -750,71 +750,27 @@ KoreanStocks/
 
 ## 📝 변경 이력
 
-### v0.4.6 (2026-03-12) — FDR 타임아웃 패치 · pipx 환경 감지 · 기술 부채 해소
+### v0.5.0 (2026-03-13) — 거시경제 통합 · MacroNewsAgent · 대시보드 거시 UI · ML 28피처
 
-- 🐛 `provider.py`: `requests.Session.send` 전역 패치로 FDR DataReader read timeout 강제 (connect 10s / read 25s) — 학습 데이터 수집 무한 hang 수정
-- 🐛 `trainer.py`: 학습 데이터 수집 글로벌 타임아웃을 고정 600s → 동적 `max(300, n_futures×3)`s 로 개선 — 종목 수 변동에 대응
-- 🔧 `tcn_model.py` / `trainer.py`: pipx 격리 venv 환경 감지 → TCN(`torch`) 미설치 시 환경별 안내 명령어 자동 출력 (`pipx inject koreanstocks torch`)
-- 🔧 `recommendation_agent.py`: `SAVEPOINT` 인덱스 assert 추가 — f-string SQL 식별자 안전성 보장
-- 🔧 `provider.py`: `_naver_last_page()` · `_naver_col_indices()` · `_get_ranking_static_fallback()` 헬퍼 메서드 추출 — CC 23→8 감소
-- 🔧 `fundamental_provider.py`: `_calc_dart_ratios()` 스태틱 메서드 추출 — 중첩 깊이 감소
+- ✨ `macro_news_agent.py` 신규: 거시 뉴스 감성 분석 + 레짐 감지 (`risk_on` / `uncertain` / `risk_off`)
+- ✨ ML 피처 20개 → 28개 (`vix_change_5d`, `tnx_level`, `tnx_change_1m`, `yield_spread`, `nasdaq_1m`, `gold_1m`, `oil_1m`, `csi300_1m`)
+- ✨ `GET /api/macro_context` 신설 — 레짐·감성·요약 반환
+- ✨ 대시보드 거시경제 UI — 레짐 배너 (Dashboard·AI추천 탭), 레짐 배지, 거시감성 모달 섹션
+- 🔧 종합 점수 3-케이스 확장 (`with_ml_macro: tech×0.35 + ml×0.35 + 종목감성×0.20 + 거시감성×0.10`)
+- 🐛 `trainer._fetch_macro_data()`: 2심볼 → 8심볼 전체 수집 (7개 피처 중요도 0% 버그 해결)
 
-### v0.4.5 (2026-03-12) — PyPI 배포 안전성 강화 · pipx TCN 활성화 안내 · 패키지 구조 개선
+### v0.4.x (2026-03-06 ~ 2026-03-12) — 가치·우량주 스크리너 · TCN 딥러닝 앙상블 · 히트맵 · 안정성 강화
 
-- 🔧 `pyproject.toml`: `torch>=2.0` → `torch>=2.4` — Python 3.11/3.12/3.13 공식 지원 최초 버전으로 `[dl]` extra 하한선 명확화
-- ✨ pipx 사용자를 위한 TCN 활성화 방법 추가 (`pipx install "koreanstocks[dl]"` / `pipx inject`) + 격리 venv 주의사항
-- 🔧 `core/` 하위 `__init__.py` 4개 추가 — namespace package → 명시적 regular package 전환 (wheel 호환성 향상)
-- 🐛 `tests/compat_check.py`: `pykrx` 제거, `lightgbm`·`catboost` 추가, `torch` 선택적 체크 추가
-- 🐛 `README_PYPI.md`: `-/.koreanstocks/` → `~/.koreanstocks/` 오타 수정
-
-### v0.4.4 (2026-03-11) — TCN 딥러닝 앙상블 추가 · 과적합 억제 · 추천 성과 UI 개선
-
-- ✨ `tcn_model.py` 신규: Dilated Causal Conv1D 기반 TCN 이진 분류 모델 (Walk-Forward CV + Early Stopping)
-- ✨ 6-모델 앙상블 완성 (RF · GB · LGB · CB · XGBRanker · TCN) — AUC 기반 Softmax 가중치 정규화
-- ✨ 모델 신뢰도 탭 TCN 카드 추가 (Log Loss "N/A (딥러닝 BCE)", 학습 샘플·Purging 표시)
-- ✨ 추천 성과 동일 종목 Collapse UI — 최신 요약행 + 이전 이력 접기/펼치기
-- 🔧 TCN 과적합 억제: `DROPOUT 0.3 → 0.4`, `weight_decay 1e-4 → 5e-4`
-
-### v0.4.3 (2026-03-11) — 추천 지속성 히트맵 고도화 · 성과 추적 버그 수정 · UX 개선
-
-- ✨ 히트맵 7등급 체계 완성 (SS/S/A/B/Cp/C/D) — 연속성·빈도·최대연속 종합 평가, 최신 점수 인라인 표시
-- ✨ D등급 재등장 배지 ("📌재등장 (총2회)"), 5단계 정렬 tiebreaker, Cp 등급 teal 보더 수정
-- 🐛 `recommendations.py`: `GET /api/recommendations/outcomes` 호출 시 `record_outcomes()` 미실행 버그 수정
-- 🔧 성과 탭 8초 자동 재시도 + 🔄 수동 재시도 버튼 (total=0 시)
-- 🔧 성과 조회 기간 버튼: 30/90/180일 → 2개월/3개월/6개월 + "조회 기간:" 레이블
-
-### v0.4.2 (2026-03-10) — 경고 전면 제거 · 추천 성과 추적 안정성 강화 · 코드 품질 개선
-
-- 🐛 `StandardScaler` feature names 불일치 경고 수정 (`prediction_model.py`)
-- 🐛 `pct_change(fill_method=None)` / `yf.download(auto_adjust=True)` FutureWarning 제거
-- 🐛 `SettingWithCopyWarning` 수정 — boolean 슬라이스 후 `.copy()` 추가 (`provider.py`)
-- 🔧 `outcome_tracker.py` 안정성 대폭 강화: `entry_price <= 0` 방어, `_get_date_range()` 헬퍼, DB `exc_info=True`
-- 🔧 `database.py`: `session_date` 인덱스 추가 (`recommendations`, `recommendation_outcomes`)
-- 🔧 `dashboard.js`: `statCard()` `ev=0` 오판 버그 수정 (`!ev` → `ev == null`)
-- 🔧 API 에러 응답에서 내부 정보 마스킹 (`recommendations.py`)
-- 🔧 `cli.py` sync: 관심종목(watchlist) 자동 백업·복원
-
-### v0.4.1 (2026-03-10) — 우량주 스크리너 추가 · ML 피처 개선 · 대시보드 히트맵 개선 · UI 품질 강화
-
-- ✨ `우량주 추천` 탭 신설 (대시보드 5번째 탭) — ROE·영업이익률·YoY성장·부채비율·PBR 필터 + 우량점수 정렬
-- ✨ `koreanstocks quality` CLI 명령어 신설
-- ✨ `GET /api/quality_stocks` 엔드포인트 신설
-- ✨ 추천 지속성 히트맵 개선 — 연속 추천(🔥)과 비연속 반복 추천(🔄/📌) 구분 배지 + 점수 범례 추가
-- 🔧 ML 피처 3개 추가: `obv_trend`, `rsi`, `cci_pct` — 17→20개
-- 🔧 ML Walk-Forward CV: VAL_STEP 20→10 거래일 (fold -24→-48), Purging 10→20거래일 강화
-- 🔧 ML 모델 depth 조정: RF max_depth 4→5, CatBoost depth 2→3
-- 🔧 앙상블 Softmax 가중치 정규화, Classifier·Ranker 분리 집계 (75%:25%)
-- 🐛 `bool(numpy.bool_)` JSON 직렬화 오류 수정 (Python 3.13 + NumPy 2.x 호환)
-- 📝 `docs/QUALITY_SCREENING.md` 신설
-
-### v0.4.0 (2026-03-06) — 가치주 스크리닝 기능 추가
-
-- ✨ `가치주 추천` 탭 신설 — PER·PBR·ROE·부채비율·F-Score 필터 + value_score 정렬
-- ✨ `koreanstocks value` CLI 명령어 신설
-- ✨ `GET /api/value_stocks` 엔드포인트 신설 — Piotroski F-Score + value_score 복합 정렬
-- 🐛 `fundamental_provider.py` DART 재작성 — ROE·부채비율 대차대조표에서 직접 계산
-- 🔧 `value_screener.py` 당일 인메모리 캐시 추가
-- 📝 `docs/VALUE_SCREENING.md` 신설
+- ✨ `가치주 추천` 탭 — PER·PBR·ROE·F-Score 필터 + `koreanstocks value` CLI + `GET /api/value_stocks`
+- ✨ `우량주 추천` 탭 — ROE·영업이익률·YoY성장 필터 + `koreanstocks quality` CLI + `GET /api/quality_stocks`
+- ✨ `tcn_model.py` 신규: Dilated Causal Conv1D TCN — 6-모델 앙상블 완성 (RF · GB · LGB · CB · XGBRanker · TCN)
+- ✨ 추천 지속성 히트맵 — 7등급 체계(SS/S/A/B/Cp/C/D), 연속 추천 배지, 5단계 정렬 tiebreaker
+- ✨ 추천 성과 Collapse UI, 성과 탭 자동 재시도, `target_hit` 소급 집계
+- 🔧 ML 피처 17→20개 (`obv_trend`, `rsi`, `cci_pct`), Walk-Forward CV 강화, TCN 과적합 억제
+- 🔧 FDR DataReader read timeout 전역 패치 — 학습 수집 hang 해결
+- 🔧 pipx 환경 감지 → `pipx inject koreanstocks torch` 안내 자동 출력
+- 🐛 pandas·yfinance FutureWarning 전면 제거, `SettingWithCopyWarning` 수정
+- 🐛 `fundamental_provider.py` DART 재작성 — ROE·부채비율 대차대조표 직접 계산
 
 ### v0.3.x (2026-02-28 - 2026-03-05) — 추천 성과 추적 · 5-모델 앙상블 · pykrx 제거
 

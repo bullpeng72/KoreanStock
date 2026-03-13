@@ -78,12 +78,18 @@ class AnalysisAgent:
         ml_raw_score   = float(ml_res.get("ensemble_score") or tech_score)  # 순수 ML 앙상블 점수
         ml_model_count = int(ml_res.get("model_count") or 0)              # 활성 모델 수 (composite 가중치 분기용)
 
+        # 5-b. 거시경제 컨텍스트 (Phase 2 & 3) — 일별 캐시로 종목 루프 비용 無
+        from koreanstocks.core.engine.macro_news_agent import macro_news_agent
+        macro_ctx       = macro_news_agent.get_macro_context()
+        macro_sentiment = float(macro_ctx.get("macro_sentiment_score") or 0)
+
         # 종합 점수 (constants.calc_composite_score 단일 소스)
         composite_score = round(calc_composite_score(
             tech_score=tech_score,
             ml_score=ml_raw_score,
             sentiment_score=sentiment_score,
             ml_model_count=ml_model_count,
+            macro_sentiment_score=macro_sentiment,
         ), 1)
 
         # 참고용: ML + 뉴스 감성 블렌딩 점수 (composite 계산에는 미사용, 표시 전용)
@@ -93,12 +99,12 @@ class AnalysisAgent:
         # 6. 시장 지수 수집 (AI 분석 컨텍스트용)
         market_indices = data_provider.get_market_indices()
 
-        # 6. AI 분석 (최근 데이터 + 순수 ML 점수 + 뉴스 점수 + 시장/섹터 맥락)
+        # 7. AI 분석 (최근 데이터 + 순수 ML 점수 + 뉴스 점수 + 시장/섹터 + 거시 맥락)
         current_price = _safe_float(df_with_indicators.iloc[-1]['close'], 0, fallback=0.0)
         ai_opinion = self._get_ai_opinion(
             name or code, df_with_indicators.tail(30), tech_score, ml_raw_score, news_res, current_price,
             market=market_val, sector=sector_val, market_indices=market_indices,
-            composite_score=composite_score,
+            composite_score=composite_score, macro_ctx=macro_ctx,
         )
 
         # 7. 결과 정리
@@ -142,8 +148,11 @@ class AnalysisAgent:
                 "sma_20":  _safe_float(latest['sma_20'],        0),
                 "bb_pos":  _bb_pos,
             },
-            "ai_opinion": ai_opinion,
-            "analysis_date": datetime.now().strftime('%Y-%m-%d %H:%M')
+            "ai_opinion":      ai_opinion,
+            "macro_regime":    macro_ctx.get("macro_regime",       "uncertain"),
+            "macro_sentiment": macro_sentiment,
+            "macro_summary":   macro_ctx.get("macro_summary",      ""),
+            "analysis_date":   datetime.now().strftime('%Y-%m-%d %H:%M'),
         }
 
         # 8. 분석 이력 저장
@@ -157,8 +166,8 @@ class AnalysisAgent:
     def _get_ai_opinion(self, name: str, recent_df: pd.DataFrame, tech_score: float, ml_score: float,
                         news_res: Dict, current_price: float = 0.0,
                         market: str = '', sector: str = '', market_indices: Dict = None,
-                        composite_score: float = None) -> Dict[str, Any]:
-        """GPT-4o-mini를 사용한 정성적 분석 (ML·뉴스 감성·시장/섹터 맥락 반영)"""
+                        composite_score: float = None, macro_ctx: Dict = None) -> Dict[str, Any]:
+        """GPT-4o-mini를 사용한 정성적 분석 (ML·뉴스 감성·시장/섹터·거시 맥락 반영)"""
         try:
             # 최근 가격 흐름 요약 (종가, 거래량, 주요 지표 포함)
             indicator_cols = ['close', 'volume', 'rsi', 'macd', 'macd_signal', 'bb_low', 'bb_high']
@@ -192,7 +201,31 @@ class AnalysisAgent:
                         chg_str = f" (전일 대비 {chg:+.2f}%)" if chg is not None else ''
                         unit = '원' if key == 'USD_KRW' else ''
                         mkt_lines.append(f"{label}: {val:,.2f}{unit}{chg_str}")
+            # 거시 레짐 + 요약 추가 (Phase 2 & 3)
+            if macro_ctx:
+                regime_label  = macro_ctx.get("macro_regime_label", "")
+                macro_summary = macro_ctx.get("macro_summary", "")
+                macro_sent    = macro_ctx.get("macro_sentiment_score", 0)
+                if regime_label:
+                    mkt_lines.append(f"거시 레짐: {regime_label} (거시감성: {macro_sent:+d})")
+                if macro_summary:
+                    mkt_lines.append(f"거시 요약: {macro_summary}")
             market_context = '\n            '.join(f"- {l}" for l in mkt_lines) if mkt_lines else '- (정보 없음)'
+
+            # 레짐별 추가 지침 (Phase 3)
+            regime_guidance = ""
+            if macro_ctx:
+                regime = macro_ctx.get("macro_regime", "uncertain")
+                if regime == "risk_off":
+                    regime_guidance = (
+                        "\n            ⚠️ 현재 거시 레짐: 위험회피 — "
+                        "BUY 판단 시 종목 고유 강점이 거시 역풍을 상쇄할 수 있는지 명시하세요."
+                    )
+                elif regime == "risk_on":
+                    regime_guidance = (
+                        "\n            ✅ 현재 거시 레짐: 위험선호 — "
+                        "모멘텀·성장 신호를 긍정적으로 해석하되 과열 리스크도 점검하세요."
+                    )
 
             prompt = f"""
             주식 종목 '{name}'에 대한 데이터와 뉴스 심리를 바탕으로 심층 분석해줘.
@@ -200,16 +233,17 @@ class AnalysisAgent:
             [점수 해석 기준]
             - 기술적 점수: 0~39 약세, 40~59 중립, 60~79 강세, 80~100 매우 강세
             - ML 점수: 향후 10거래일 크로스섹셔널 순위 예측 (0=전체 최하위 상대강도, 50=평균, 100=전체 최상위)
-            - 뉴스 감성: -100~-50 매우 부정, -49~-1 부정, 0 중립, 1~50 긍정, 51~100 매우 긍정
+            - 종목 감성: -100~-50 매우 부정, -49~-1 부정, 0 중립, 1~50 긍정, 51~100 매우 긍정
+            - 거시 감성: 동일 척도, 한국 주식시장 전체에 미치는 거시경제 영향
 
-            [시장/섹터 맥락]
+            [시장/섹터 및 거시 맥락]{regime_guidance}
             {market_context}
 
             [정량 점수]
-            - 종합 점수(가중합): {f'{composite_score:.1f}' if composite_score is not None else 'N/A'}/100  ← 핵심 판단 기준 (tech 40% + ML 35% + 감성 25%)
+            - 종합 점수(가중합): {f'{composite_score:.1f}' if composite_score is not None else 'N/A'}/100  ← 핵심 판단 기준 (tech 35% + ML 35% + 종목감성 20% + 거시감성 10%)
             - 기술적 지표 점수: {tech_score}/100
             - 머신러닝 예측 점수: {ml_score}/100
-            - 뉴스 감성 점수: {float(news_res.get('sentiment_score') or 0)} (-100~100, 양수면 호재)
+            - 종목 뉴스 감성: {float(news_res.get('sentiment_score') or 0)} (-100~100, 양수면 호재)
 
             [현재 기술적 지표]
             - 현재가: {int(current_price):,}원
@@ -229,7 +263,7 @@ class AnalysisAgent:
                 "summary": "한 줄 요약",
                 "strength": "강점 (최대 2개)",
                 "weakness": "약점 (최대 2개)",
-                "reasoning": "기술적 지표, ML 예측, 뉴스 심리를 모두 반영한 상세 추천 사유",
+                "reasoning": "기술적 지표, ML 예측, 뉴스 심리, 거시 레짐을 모두 반영한 상세 추천 사유",
                 "action": "BUY, HOLD, SELL 중 하나 (반드시 영문 대문자 3종 중 하나만)",
                 "target_price": "10거래일 목표가 (숫자만, 현재가 기준으로 BUY면 현재가 이상, SELL이면 현재가 이하로 설정)",
                 "target_rationale": "목표가 산출의 구체적 근거"

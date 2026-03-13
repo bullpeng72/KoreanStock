@@ -1,7 +1,7 @@
 # 뉴스 감성 분석 시스템 기술 문서
 
-> Korean Stocks AI/ML Analysis System `v0.4.6`
-> 최종 업데이트: 2026-03-12
+> Korean Stocks AI/ML Analysis System `v0.5.0`
+> 최종 업데이트: 2026-03-13
 
 ---
 
@@ -13,7 +13,8 @@
 4. [감성 분석](#4-감성-분석)
 5. [캐시 구조](#5-캐시-구조)
 6. [점수 반영](#6-점수-반영)
-7. [설계 원칙 및 한계](#7-설계-원칙-및-한계)
+7. [거시 뉴스 감성 분석 (MacroNewsAgent)](#7-거시-뉴스-감성-분석-macronewsagent)
+8. [설계 원칙 및 한계](#8-설계-원칙-및-한계)
 
 ---
 
@@ -290,25 +291,122 @@ CREATE TABLE sentiment_cache (
 sentiment_norm = max(0.0, min(100.0, (sentiment_score + 100.0) / 2.0))
 # -100 → 0,  0 → 50,  100 → 100
 
-# ML 모델 활성 시
+# ML + 거시감성 활성 시 (MacroNewsAgent 정상 동작)
+composite = tech_score * 0.35 + ml_score * 0.35 + sentiment_norm * 0.20 + macro_norm * 0.10
+
+# ML 활성, 거시감성 없을 시 (MacroNewsAgent 오류·API 키 미설정)
 composite = tech_score * 0.40 + ml_score * 0.35 + sentiment_norm * 0.25
 
 # ML 모델 없을 시 (fallback)
 composite = tech_score * 0.65 + sentiment_norm * 0.35
 ```
 
-감성 점수는 composite의 최대 25%를 차지한다.
+**종목 감성(`sentiment_norm`)** 은 composite에서 20%(ML+macro) 또는 25%(ML만)를 차지한다.
 뉴스 노이즈가 높은 특성을 감안해 tech·ML 대비 낮은 비중으로 고정.
+거시감성(`macro_norm`)은 별도의 `MacroNewsAgent`가 제공하며 섹션 7 참고.
 
 ---
 
-## 7. 설계 원칙 및 한계
+---
+
+## 7. 거시 뉴스 감성 분석 (MacroNewsAgent)
+
+담당: `src/koreanstocks/core/engine/macro_news_agent.py` → `MacroNewsAgent`
+
+종목 뉴스(`NewsAgent`)와 독립적으로 **거시경제 전반**을 분석하며, 모든 종목의 종합 점수에 공통 반영된다.
+
+```
+거시 뉴스 수집 (Naver News API, 6개 키워드 × 5건)
+  → GPT-4o-mini 감성 분석
+  → macro_sentiment_score (-100 ~ 100)
+  → 시황 지표(VIX·S&P500·TNX·CSI300) 기반 레짐 분류
+  → macro_regime: risk_on / uncertain / risk_off
+  → composite 거시감성 가중 반영 (10%)
+  → 레짐별 추천 임계값 조정
+```
+
+### 7-1. 수집 키워드
+
+| 키워드 | 목적 |
+|--------|------|
+| `미국 증시` | 미국 증시 전반 |
+| `연방준비제도 금리` | Fed 통화정책 |
+| `한국 증시 코스피` | KOSPI 동향 |
+| `중국 경제` | 중국 경기 |
+| `원달러 환율` | 환율 리스크 |
+| `국제유가 금` | 원자재·안전자산 |
+
+각 키워드당 최신 5건 수집, HTML 엔티티 디코딩, 당일 캐싱.
+
+### 7-2. 레짐 감지 (`_detect_regime`)
+
+퀀트 스코어링 방식 — VIX·장단기 스프레드·S&P500·CSI300 기반으로 `risk_on / uncertain / risk_off`를 판별한다.
+
+**공포 지표 (off_score):**
+
+| 조건 | 점수 |
+|------|------|
+| VIX > 25 | +2 |
+| VIX > 20 | +1 |
+| VIX 5일 변화율 > 20% | +1 |
+| 장단기 스프레드(10Y-3M) < −0.3 | +2 (역전) |
+| 장단기 스프레드 < 0.5 | +1 |
+| S&P500 1개월 < −5% | +1 |
+| CSI300 1개월 < −5% | +1 |
+
+**낙관 지표 (on_score):**
+
+| 조건 | 점수 |
+|------|------|
+| VIX < 15 | +2 |
+| VIX < 18 | +1 |
+| 장단기 스프레드 > 1.5 | +1 |
+| S&P500 1개월 > +3% | +1 |
+| CSI300 1개월 > +3% | +1 |
+
+**레짐 판정:** `off_score ≥ 3` → `risk_off` / `on_score ≥ 3` → `risk_on` / 그 외 → `uncertain`
+
+### 7-3. 레짐별 추천 임계값
+
+레짐에 따라 `composite_score` 최소 기준을 동적으로 조정한다.
+
+| 레짐 | 한글 표시 | 최소 composite | 배경 |
+|------|----------|---------------|------|
+| `risk_on` | 🟢 위험선호 | **45.0** | 유동성·심리 우호 — 낮은 진입 문턱 |
+| `uncertain` | 🟡 불확실` | **50.0** | 기본값 |
+| `risk_off` | 🔴 위험회피 | **57.0** | 방어적 포지션 — 높은 진입 문턱 |
+
+> 레짐 필터 후 후보가 0개이면 임계값을 무시하고 전체 복원(fallback)한다.
+
+### 7-4. 당일 캐싱
+
+`_market_cache['__macro_news__']` 딕셔너리에 `{date, sentiment_score, regime, regime_label, summary}` 저장.
+당일 첫 호출 시만 Naver API + GPT 비용 발생. 서버 재시작해도 날짜가 같으면 재사용 안 됨 (메모리 캐시).
+
+### 7-5. API 엔드포인트
+
+```
+GET /api/macro_context
+응답: {
+  "macro_regime":          "risk_off",
+  "macro_regime_label":    "🔴 위험회피",
+  "macro_sentiment_score": -35,
+  "macro_summary":         "美 연준 긴축 우려 재부각, VIX 급등…"
+}
+```
+
+대시보드 거시경제 배너와 종목 모달의 거시감성 섹션이 이 엔드포인트를 호출한다.
+
+---
+
+## 8. 설계 원칙 및 한계
 
 ### 고정값 (임의 수정 금지)
 
 | 항목 | 값 | 이유 |
 |------|----|------|
-| sentiment 가중치 | 25% (ML 있음), 35% (ML 없음) | 백테스트 검증 기반 |
+| 종목 감성 가중치 | 20% (ML+macro), 25% (ML만), 35% (ML 없음) | 백테스트 검증 기반 |
+| 거시 감성 가중치 | 10% (MacroNewsAgent 활성 시) | 종목 수급과 독립적 거시 요인 반영 |
 | 시간 감쇠 계수 | λ = 0.35 | 1일 전 70%, 7일 전 9%로 적절한 감쇠 |
 | Jaccard 임계값 | 0.75 | 낮추면 과잉 제거, 높이면 중복 잔존 |
 | 계열사 필터 fallback | 0건일 때만 원본 반환 | 소형주·짧은 종목명 방어 |

@@ -115,6 +115,51 @@ function syncThemeBtn() {
   btn.title = isDark ? "라이트 모드로 전환" : "다크 모드로 전환";
 }
 
+// ── 거시 레짐 배너 ───────────────────────────────────────────────
+let _macroBannerCache = null; // { data, fetchedAt }
+
+async function loadMacroBanner() {
+  // 12시간 캐시 (일별 1회 계산이므로 반일 재사용)
+  if (_macroBannerCache && (Date.now() - _macroBannerCache.fetchedAt) < 43200000) {
+    _renderMacroBanner(_macroBannerCache.data);
+    return;
+  }
+  try {
+    const data = await api("/api/macro_context");
+    _macroBannerCache = { data, fetchedAt: Date.now() };
+    _renderMacroBanner(data);
+  } catch (_e) { /* 실패 시 배너 숨김 */ }
+}
+
+function _renderMacroBanner(data) {
+  const regime  = data.macro_regime          || "uncertain";
+  const label   = data.macro_regime_label    || "불확실";
+  const score   = data.macro_sentiment_score ?? 0;
+  const summary = data.macro_summary         || "";
+
+  const icon       = regime === "risk_on" ? "🟢" : regime === "risk_off" ? "🔴" : "🟡";
+  const scoreColor = score > 0 ? "var(--buy)" : score < 0 ? "var(--sell)" : "var(--muted)";
+  const scoreStr   = (score > 0 ? "+" : "") + score;
+
+  const html = `
+    <div class="macro-banner ${esc(regime)}">
+      <span style="font-size:1.15em;flex-shrink:0">${icon}</span>
+      <div>
+        <span style="font-weight:700">거시 레짐:</span>
+        <span class="regime-badge ${esc(regime)}">${esc(label)}</span>
+        <span style="margin-left:10px;color:${scoreColor};font-weight:600">거시감성 ${esc(scoreStr)}</span>
+        ${summary
+          ? `<span style="margin-left:10px;color:var(--muted);font-size:.93em">${esc(summary)}</span>`
+          : ""}
+      </div>
+    </div>`;
+
+  ["macro-banner-dashboard", "macro-banner-rec"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+  });
+}
+
 // ── 탭 전환 ─────────────────────────────────────────────────────
 let _modelHealthLoaded = false;
 let _valueLoaded       = false;
@@ -200,6 +245,15 @@ function buildModalHtml(rec) {
   const articles = si.articles || [];
   const topNews  = si.top_news || "";
 
+  // 거시경제 컨텍스트
+  const macroRegime  = rec.macro_regime       || "uncertain";
+  const macroLabel   = rec.macro_regime_label || "";
+  const macroSentRaw = rec.macro_sentiment    ?? null;
+  const macroNorm    = macroSentRaw != null ? Math.min(100, Math.max(0, (macroSentRaw + 100) / 2)) : null;
+  const macroSentColor = macroSentRaw == null ? "var(--muted)"
+    : macroSentRaw > 0 ? "var(--buy)" : macroSentRaw < 0 ? "var(--sell)" : "var(--muted)";
+  const macroSummary = rec.macro_summary || "";
+
   const newsHtml = buildNewsHtml(articles, topNews);
 
   return `
@@ -224,7 +278,8 @@ function buildModalHtml(rec) {
     <div style="margin:10px 0">
       ${scoreBarHtml("기술점수", techScore)}
       ${scoreBarHtml("ML점수",   mlScore)}
-      ${scoreBarHtml("감성점수", sentNorm)}
+      ${scoreBarHtml("종목감성", sentNorm)}
+      ${macroNorm != null ? scoreBarHtml("거시감성", macroNorm) : ""}
     </div>
 
     <hr class="divider">
@@ -255,6 +310,13 @@ function buildModalHtml(rec) {
           <span style="color:${sentColor};font-weight:700">${sentRaw} · ${sentLabel}</span>
         </div>
         ${si.reason ? `<div style="font-size:.78em;color:var(--muted);margin-top:4px">${esc(si.reason)}</div>` : ""}
+
+        <div class="modal-section-title" style="margin-top:14px">🌐 거시경제 레짐</div>
+        <div style="font-size:.88em;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          ${macroLabel ? `<span class="regime-badge ${esc(macroRegime)}">${esc(macroLabel)}</span>` : "<span style='color:var(--muted)'>—</span>"}
+          ${macroSentRaw != null ? `<span style="color:${macroSentColor};font-weight:600">거시감성 ${macroSentRaw > 0 ? "+" : ""}${macroSentRaw}</span>` : ""}
+        </div>
+        ${macroSummary ? `<div style="font-size:.78em;color:var(--muted);margin-top:4px">${esc(macroSummary)}</div>` : ""}
       </div>
 
       <!-- 우측: AI 분석 -->
@@ -308,6 +370,11 @@ function bucketBadge(bucket, label) {
   return `<span class="bucket-badge bucket-${esc(bucket)}">${esc(label)}</span>`;
 }
 
+function regimeBadge(regime, label) {
+  if (!regime || regime === "uncertain" || !label) return "";
+  return `<span class="regime-badge ${esc(regime)}">${esc(label)}</span>`;
+}
+
 // ── 추천 카드 렌더링 ─────────────────────────────────────────────
 // 컨테이너별 rec 저장소 — 탭 간 인덱스 충돌 방지
 const _recDataStores = {};
@@ -324,7 +391,7 @@ function buildRecRow(rec, store) {
     <div class="rec-row" data-rec-idx="${idx}" style="cursor:pointer">
       <div>
         <div class="rec-row-name">${esc(rec.name || rec.code)}</div>
-        <div class="rec-row-code">${esc(rec.code)} ${mktBadge(rec.market)}${bucketBadge(rec.bucket, rec.bucket_label)}
+        <div class="rec-row-code">${esc(rec.code)} ${mktBadge(rec.market)}${bucketBadge(rec.bucket, rec.bucket_label)}${regimeBadge(rec.macro_regime, rec.macro_regime_label)}
           ${rec.theme && rec.theme !== "전체"
             ? `<span style="font-size:.72em;color:var(--muted);margin-left:4px">[${esc(rec.theme)}]</span>` : ""}</div>
       </div>
@@ -349,13 +416,23 @@ function buildRecRow(rec, store) {
 }
 
 function calcComposite(rec) {
+  // 서버에서 이미 거시감성까지 반영해 계산한 값을 우선 사용
+  if (rec.composite_score != null) return Number(rec.composite_score).toFixed(1);
+  // 폴백: 클라이언트 재계산 (거시감성 포함)
   const t = rec.tech_score ?? 50;
   const m = rec.ml_score  ?? 50;
-  const s = Math.min(100, Math.max(0, ((rec.sentiment_score ?? 0) + 100) / 2));
-  const hasML = (rec.ml_score != null);
-  const score = hasML
-    ? t * 0.40 + m * 0.35 + s * 0.25
-    : t * 0.65 + s * 0.35;
+  const s = Math.min(100, Math.max(0, ((rec.sentiment_score  ?? 0) + 100) / 2));
+  const hasML    = (rec.ml_score != null);
+  const macroRaw = rec.macro_sentiment ?? null;
+  const macro    = macroRaw != null ? Math.min(100, Math.max(0, (macroRaw + 100) / 2)) : null;
+  let score;
+  if (hasML && macro != null) {
+    score = t * 0.35 + m * 0.35 + s * 0.20 + macro * 0.10;
+  } else if (hasML) {
+    score = t * 0.40 + m * 0.35 + s * 0.25;
+  } else {
+    score = t * 0.65 + s * 0.35;
+  }
   return score.toFixed(1);
 }
 
@@ -2101,7 +2178,7 @@ function renderComponentReliability(ens, formula) {
       <div style="font-weight:700;margin-bottom:8px">📈 기술적 점수</div>
       <div class="kv-row" style="font-size:.82em"><span class="kv-key">방식</span><span class="kv-val">RSI · MACD · BB · ADX 등 13개 지표</span></div>
       <div class="kv-row" style="font-size:.82em"><span class="kv-key">범위</span><span class="kv-val">0 ~ 100</span></div>
-      <div class="kv-row" style="font-size:.82em"><span class="kv-key">가중치</span><span class="kv-val">${mlActive ? "40%" : "65%"} (ML ${mlActive ? "활성" : "비활성"})</span></div>
+      <div class="kv-row" style="font-size:.82em"><span class="kv-key">가중치</span><span class="kv-val">${mlActive ? "35%" : "65%"} (ML ${mlActive ? "활성" : "비활성"})</span></div>
       <div style="margin-top:8px;font-size:.8em;color:var(--muted)">
         주의: 과거 패턴 기반. 추세 변환 초기 신호 포착이 강점.
       </div>
@@ -2129,9 +2206,20 @@ function renderComponentReliability(ens, formula) {
       <div style="font-weight:700;margin-bottom:8px">📰 뉴스 감성</div>
       <div class="kv-row" style="font-size:.82em"><span class="kv-key">방식</span><span class="kv-val">Naver News + GPT-4o-mini</span></div>
       <div class="kv-row" style="font-size:.82em"><span class="kv-key">범위</span><span class="kv-val">-100 ~ +100 (정규화 후 0~100)</span></div>
-      <div class="kv-row" style="font-size:.82em"><span class="kv-key">가중치</span><span class="kv-val">25%</span></div>
+      <div class="kv-row" style="font-size:.82em"><span class="kv-key">가중치</span><span class="kv-val">${mlActive ? "20%" : "35%"}</span></div>
       <div style="margin-top:8px;font-size:.8em;color:var(--muted)">
         주의: 뉴스 편향 가능. 긍정 편향 수정 적용됨 (v0.3.2).
+      </div>
+      <div style="margin-top:6px;color:#f59e0b;font-size:.9em">★★★☆☆</div>
+    </div>
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:16px">
+      <div style="font-weight:700;margin-bottom:8px">🌐 거시감성</div>
+      <div class="kv-row" style="font-size:.82em"><span class="kv-key">방식</span><span class="kv-val">Naver News(거시 키워드 6종) + GPT-4o-mini + 퀀트 레짐</span></div>
+      <div class="kv-row" style="font-size:.82em"><span class="kv-key">범위</span><span class="kv-val">-100 ~ +100 (정규화 후 0~100)</span></div>
+      <div class="kv-row" style="font-size:.82em"><span class="kv-key">레짐 분류</span><span class="kv-val">VIX · 장단기 스프레드 · S&amp;P500 · CSI300 기반</span></div>
+      <div class="kv-row" style="font-size:.82em"><span class="kv-key">가중치</span><span class="kv-val">${mlActive ? "10%" : "미사용 (ML 없을 시)"}</span></div>
+      <div style="margin-top:8px;font-size:.8em;color:var(--muted)">
+        일별 1회 캐시. 레짐 risk_off 시 추천 임계값 57점으로 상향.
       </div>
       <div style="margin-top:6px;color:#f59e0b;font-size:.9em">★★★☆☆</div>
     </div>`;
@@ -2142,19 +2230,47 @@ function renderComponentReliability(ens, formula) {
   formulaDiv.style.cssText = "background:var(--bg-dark);border-radius:8px;padding:14px 16px;font-size:.88em";
   formulaDiv.innerHTML = `
     <div style="font-weight:700;margin-bottom:8px">종합 점수 산출 공식</div>
-    <div style="margin-bottom:6px">
-      <span style="color:var(--muted)">ML 모델 활성 시:</span>
-      <code style="margin-left:8px;color:var(--accent)">${esc(formula.with_ml)}</code>
+    <div style="margin-bottom:5px">
+      <span style="color:var(--muted);font-size:.85em">ML + 거시감성 활성 시:</span><br>
+      <code style="color:var(--accent)">${esc(formula.with_ml_macro || formula.with_ml)}</code>
+    </div>
+    <div style="margin-bottom:5px">
+      <span style="color:var(--muted);font-size:.85em">ML 활성 (거시감성 미반영):</span><br>
+      <code style="color:var(--accent)">${esc(formula.with_ml)}</code>
     </div>
     <div>
-      <span style="color:var(--muted)">ML 모델 없을 시:</span>
-      <code style="margin-left:8px;color:var(--hold)">${esc(formula.without_ml)}</code>
+      <span style="color:var(--muted);font-size:.85em">ML 없을 시:</span><br>
+      <code style="color:var(--hold)">${esc(formula.without_ml)}</code>
     </div>
     <div style="margin-top:8px;font-size:.8em;color:var(--muted)">
-      ※ sentiment_norm = (sentiment_score + 100) / 2  →  0~100 정규화
+      ※ sentiment_norm = (score + 100) / 2  →  0~100 정규화 (종목감성·거시감성 동일 적용)
     </div>`;
   wrap.appendChild(formulaDiv);
   return wrap;
+}
+
+// ═══════════════════════════════════════════════════════
+// AI 추천 교차 확인 헬퍼
+// ═══════════════════════════════════════════════════════
+
+let _aiRecCodesCache = null; // { map: Set<string>, date: string, fetchedAt: number }
+
+async function fetchAiRecCodes() {
+  // 1시간 캐시
+  if (_aiRecCodesCache && (Date.now() - _aiRecCodesCache.fetchedAt) < 3600000) {
+    return _aiRecCodesCache;
+  }
+  try {
+    const dates = await api("/api/recommendations/dates");
+    if (!dates.length) return { map: new Set(), date: null };
+    const latest = dates[0];
+    const data = await api(`/api/recommendations?date=${encodeURIComponent(latest)}`);
+    const recs = data.recommendations || [];
+    _aiRecCodesCache = { map: new Set(recs.map(r => r.code)), date: latest, fetchedAt: Date.now() };
+    return _aiRecCodesCache;
+  } catch (_e) {
+    return { map: new Set(), date: null };
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2211,8 +2327,13 @@ async function runValueScreener() {
   const controller = new AbortController();
   const abortTimer = setTimeout(() => controller.abort(), 200000);
   try {
-    const data = await api(`/api/value_stocks?${params}`, { signal: controller.signal });
+    const [data, aiRec] = await Promise.all([
+      api(`/api/value_stocks?${params}`, { signal: controller.signal }),
+      fetchAiRecCodes(),
+    ]);
     const stocks = data.stocks || [];
+    const aiMap  = aiRec.map;
+    const aiDate = aiRec.date;
     setStatus("val-status", "");
 
     if (!stocks.length) {
@@ -2220,11 +2341,16 @@ async function runValueScreener() {
       return;
     }
 
-    const valMeta = document.getElementById("val-result-meta");
-    if (valMeta) valMeta.textContent = `${stocks.length}개 종목 (F-Score · 가치점수 복합 정렬)`;
+    const aiOverlap = stocks.filter(s => aiMap.has(s.code)).length;
+    const aiNote    = aiOverlap > 0 && aiDate ? ` · AI추천(${esc(aiDate)}) ${aiOverlap}종목 포함` : "";
+    const valMeta   = document.getElementById("val-result-meta");
+    if (valMeta) valMeta.textContent = `${stocks.length}개 종목 (F-Score · 가치점수 복합 정렬)${aiNote}`;
     if (!tbody) return;
 
     tbody.innerHTML = stocks.map(s => {
+      const isAiRec    = aiMap.has(s.code);
+      const aiRecBadge = isAiRec ? `<span class="ai-rec-badge">★ AI추천</span>` : "";
+      const rowClass   = isAiRec ? ' class="ai-rec-row"' : "";
       const fScore = s.f_score ?? 0;
       const fColor = fScore >= 7 ? "var(--buy)" : fScore >= 4 ? "var(--hold)" : "var(--sell)";
       const vScore = s.value_score ?? 0;
@@ -2233,8 +2359,8 @@ async function runValueScreener() {
       const yoyTxt = yoy == null ? "—" : (yoy >= 0 ? `+${yoy.toFixed(1)}%` : `${yoy.toFixed(1)}%`);
       const yoyCls = yoy == null ? "" : yoy >= 0 ? "pos" : "neg";
       const sector = [s.market, s.sector].filter(Boolean).join(" · ");
-      return `<tr>
-        <td><strong>${esc(s.name || s.code)}</strong>
+      return `<tr${rowClass}>
+        <td><strong>${esc(s.name || s.code)}</strong>${aiRecBadge}
             <span style="font-size:.76em;color:var(--muted);margin-left:4px">${esc(s.code)}</span></td>
         <td style="font-size:.8em;color:var(--muted)">${esc(sector) || "—"}</td>
         <td style="text-align:right">${s.per != null ? s.per.toFixed(1) + "x" : "—"}</td>
@@ -2311,8 +2437,13 @@ async function runQualityScreener() {
   const controller = new AbortController();
   const abortTimer = setTimeout(() => controller.abort(), 200000);
   try {
-    const data   = await api(`/api/quality_stocks?${params}`, { signal: controller.signal });
+    const [data, aiRec] = await Promise.all([
+      api(`/api/quality_stocks?${params}`, { signal: controller.signal }),
+      fetchAiRecCodes(),
+    ]);
     const stocks = data.stocks || [];
+    const aiMap  = aiRec.map;
+    const aiDate = aiRec.date;
     setStatus("qual-status", "");
 
     if (!stocks.length) {
@@ -2320,11 +2451,16 @@ async function runQualityScreener() {
       return;
     }
 
-    const qualMeta = document.getElementById("qual-result-meta");
-    if (qualMeta) qualMeta.textContent = `${stocks.length}개 종목 (우량점수 내림차순)`;
+    const aiOverlap = stocks.filter(s => aiMap.has(s.code)).length;
+    const aiNote    = aiOverlap > 0 && aiDate ? ` · AI추천(${esc(aiDate)}) ${aiOverlap}종목 포함` : "";
+    const qualMeta  = document.getElementById("qual-result-meta");
+    if (qualMeta) qualMeta.textContent = `${stocks.length}개 종목 (우량점수 내림차순)${aiNote}`;
     if (!tbody) return;
 
     tbody.innerHTML = stocks.map(s => {
+      const isAiRec    = aiMap.has(s.code);
+      const aiRecBadge = isAiRec ? `<span class="ai-rec-badge">★ AI추천</span>` : "";
+      const rowClass   = isAiRec ? ' class="ai-rec-row"' : "";
       const qScore  = s.quality_score ?? 0;
       const qColor  = qScore >= 70 ? "var(--buy)" : qScore >= 50 ? "var(--hold)" : "var(--sell)";
       const yoy     = s.op_income_yoy;
@@ -2333,8 +2469,8 @@ async function runQualityScreener() {
       const sector  = [s.market, s.sector].filter(Boolean).join(" · ");
       const margin  = s.op_margin;
       const div     = s.dividend_yield;
-      return `<tr>
-        <td><strong>${esc(s.name || s.code)}</strong>
+      return `<tr${rowClass}>
+        <td><strong>${esc(s.name || s.code)}</strong>${aiRecBadge}
             <span style="font-size:.76em;color:var(--muted);margin-left:4px">${esc(s.code)}</span></td>
         <td style="font-size:.8em;color:var(--muted)">${esc(sector) || "—"}</td>
         <td style="text-align:right;color:var(--buy)">${s.roe != null ? s.roe.toFixed(1) + "%" : "—"}</td>
@@ -2367,6 +2503,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // 탭 1 — Dashboard
   loadMarketIndices();
+  loadMacroBanner();     // 거시 레짐 배너 (탭1·탭3 공용)
   loadPortfolioSummary();
   loadDashDates();
   loadHeatmap("dash-heatmap", 14);

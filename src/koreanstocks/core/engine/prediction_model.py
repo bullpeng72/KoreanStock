@@ -200,10 +200,20 @@ class StockPredictionModel:
                 logger.warning(f"yfinance fallback for {yf_sym} also failed: {e2}")
         return pd.DataFrame()
 
-    def _get_macro_df(self) -> pd.DataFrame:
-        """VIX·S&P500 거시경제 데이터 반환 (당일 캐싱).
+    # Phase 1: 확장된 거시 심볼 목록
+    _MACRO_SYMBOLS = ['^VIX', '^GSPC', '^IXIC', '^TNX', '^IRX', 'GC=F', 'CL=F', '000300.SS']
 
-        컬럼: vix_level, vix_change_5d, sp500_1m — 인덱스: 날짜(tz-naive)
+    def _get_macro_df(self) -> pd.DataFrame:
+        """거시경제 데이터 반환 (당일 캐싱).
+
+        컬럼 (28개 피처 중 거시 10개 소스):
+          vix_level, vix_change_5d,          — VIX 레벨·변화율
+          sp500_1m, nasdaq_1m,               — 미국 증시
+          tnx_level, tnx_change_1m,          — 미국채 10Y 금리
+          yield_spread,                      — 장단기 스프레드 (10Y-3M)
+          gold_1m, oil_1m,                   — 금·유가
+          csi300_1m                          — 중국 CSI300
+        인덱스: 날짜(tz-naive)
         """
         from datetime import date as _date
         today = _date.today().isoformat()
@@ -212,16 +222,48 @@ class StockPredictionModel:
             return cached['df']
         try:
             import yfinance as yf
-            raw = yf.download(['^VIX', '^GSPC'], period='2y', progress=False, auto_adjust=True)
+            raw = yf.download(
+                self._MACRO_SYMBOLS, period='2y', progress=False, auto_adjust=True
+            )
             if not raw.empty:
-                close = raw.xs('Close', level=0, axis=1) if isinstance(raw.columns, pd.MultiIndex) else raw['Close']
-                macro = pd.DataFrame(index=close.index)
-                macro.index = pd.to_datetime(macro.index).tz_localize(None)
-                macro['vix_level']     = close['^VIX'].values
-                macro['vix_change_5d'] = close['^VIX'].pct_change(5, fill_method=None).values
-                macro['sp500_1m']      = close['^GSPC'].pct_change(20, fill_method=None).values
+                close = (
+                    raw.xs('Close', level=0, axis=1)
+                    if isinstance(raw.columns, pd.MultiIndex)
+                    else raw[['Close']].rename(columns={'Close': self._MACRO_SYMBOLS[0]})
+                )
+                _idx = pd.to_datetime(close.index)
+                macro = pd.DataFrame(
+                    index=_idx.tz_convert(None) if _idx.tz is not None else _idx.tz_localize(None)
+                )
+
+                def _s(sym: str) -> pd.Series:
+                    """심볼 컬럼 안전 조회 — 없으면 NaN 시리즈 반환."""
+                    return close[sym] if sym in close.columns else pd.Series(
+                        dtype=float, index=macro.index
+                    )
+
+                vix = _s('^VIX')
+                macro['vix_level']     = vix.values
+                macro['vix_change_5d'] = vix.pct_change(5, fill_method=None).values
+                macro['sp500_1m']      = _s('^GSPC').pct_change(20, fill_method=None).values
+                macro['nasdaq_1m']     = _s('^IXIC').pct_change(20, fill_method=None).values
+
+                tnx = _s('^TNX')
+                irx = _s('^IRX')
+                macro['tnx_level']     = tnx.values
+                macro['tnx_change_1m'] = tnx.diff(20).values           # 절대 변화 (pp)
+                macro['yield_spread']  = (tnx - irx).values             # 10Y-3M 스프레드
+
+                macro['gold_1m']       = _s('GC=F').pct_change(20, fill_method=None).values
+                macro['oil_1m']        = _s('CL=F').pct_change(20, fill_method=None).values
+                macro['csi300_1m']     = _s('000300.SS').pct_change(20, fill_method=None).values
+
                 macro = macro.ffill()
                 self._market_cache['__macro__'] = {'df': macro, 'date': today}
+                logger.debug(
+                    f"[MacroDF] 수집 완료: {len(macro)}행, "
+                    f"컬럼={list(macro.columns)}"
+                )
                 return macro
         except Exception as e:
             logger.warning(f"Macro data fetch failed: {e}")

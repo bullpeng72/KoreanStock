@@ -1,6 +1,6 @@
 # 📈 Korean Stocks AI/ML Analysis System
 
-![version](https://img.shields.io/badge/version-0.4.6-blue)
+![version](https://img.shields.io/badge/version-0.5.0-blue)
 ![python](https://img.shields.io/badge/python-3.11~3.13-green)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
@@ -71,9 +71,9 @@ ML          Scikit-learn (Random Forest, Gradient Boosting) + XGBoost Ranker + L
             → 6-모델 앙상블 (분류기+TCN 75% + 랜커 25%, AUC 기반 Softmax 가중치)
 기술 지표    ta (RSI, MACD, BB, SMA, OBV, ADX, VWAP, CMF, MFI, Stochastic, CCI, ATR, Donchian)
              + finta (SQZMI, VZO, Fisher Transform, Williams Fractal)
-ML 피처     20개 (변동성·추세강도·시장 상대강도·모멘텀·finta·거래량·거시경제·극값감지)
+ML 피처     28개 (변동성·추세강도·시장 상대강도·모멘텀·finta·거래량·거시경제 10개·극값감지)
 데이터       FinanceDataReader, KIND API (KRX 전종목), Naver News API, DART Open API (선택)
-             Yahoo Finance (VIX · S&P500 거시지표)
+             Yahoo Finance (VIX·S&P500·NASDAQ·10Y금리·장단기스프레드·금·유가·CSI300)
 DB          SQLite (data/storage/stock_analysis.db)
 자동화       GitHub Actions (평일 16:30 KST), Telegram Bot API
 시각화       Plotly, Matplotlib, Chart.js (백테스트 차트)
@@ -189,11 +189,12 @@ flowchart TD
     POOL["분석 풀 (최대 80종목)"] --> PAR["병렬 분석<br/>max_workers=5 · timeout=60s"]
 
     PAR --> T["1단계 기술적 지표<br/>tech_score 0~100<br/>추세(40) + 모멘텀(30) + BB/CMF/거래량(30)"]
-    PAR --> ML["2단계 ML 앙상블<br/>ml_score 0~100<br/>RF · GB · LGB · CB + XGBRanker<br/>20개 피처 · 101분위 캘리브레이션"]
+    PAR --> ML["2단계 ML 앙상블<br/>ml_score 0~100<br/>RF · GB · LGB · CB + XGBRanker<br/>28개 피처 · 101분위 캘리브레이션"]
     PAR --> N["3단계 뉴스 감성<br/>sentiment_score -100~100<br/>GPT-4o-mini · 지수감쇠 시간가중"]
+    PAR --> MN["3단계-B 거시감성<br/>macro_sentiment -100~100<br/>MacroNewsAgent · 레짐 감지"]
 
-    T & ML & N --> GPT["4단계 GPT-4o-mini<br/>AI 종합 의견<br/>BUY/HOLD/SELL · 목표가 · 강점/약점"]
-    GPT --> C["종합 점수 산출<br/>tech×0.40 + ml×0.35 + sentiment_norm×0.25"]
+    T & ML & N & MN --> GPT["4단계 GPT-4o-mini<br/>AI 종합 의견<br/>BUY/HOLD/SELL · 목표가 · 강점/약점"]
+    GPT --> C["종합 점수 산출<br/>tech×0.35 + ml×0.35<br/>+ 종목감성×0.20 + 거시감성×0.10"]
     C --> Q["버킷 쿼터 기반 최종 N종목<br/>섹터 다양성 고려"]
     Q --> DB[("SQLite DB<br/>날짜별 저장")]
     Q --> TG["📱 텔레그램<br/>구조화 리포트"]
@@ -203,14 +204,18 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    T["Tech Score<br/>0~100"] -->|"× 0.40"| SUM["종합 점수<br/>0~100"]
+    T["Tech Score<br/>0~100"] -->|"× 0.35"| SUM["종합 점수<br/>0~100"]
     ML["ML Score<br/>0~100"] -->|"× 0.35"| SUM
-    N["News Score<br/>-100~100 → 정규화 0~100"] -->|"× 0.25"| SUM
-    SUM --> FB["※ ML 모델 없을 때<br/>tech×0.65 + sentiment_norm×0.35"]
-    style FB fill:#f9f,stroke:#999,stroke-dasharray:5 5
+    N["종목 감성<br/>0~100 정규화"] -->|"× 0.20"| SUM
+    MN["거시 감성<br/>0~100 정규화"] -->|"× 0.10"| SUM
+    SUM --> FB1["※ 거시감성 없을 때<br/>tech×0.40 + ml×0.35 + 종목감성×0.25"]
+    SUM --> FB2["※ ML 모델 없을 때<br/>tech×0.65 + sentiment_norm×0.35"]
+    style FB1 fill:#ffe,stroke:#999,stroke-dasharray:5 5
+    style FB2 fill:#f9f,stroke:#999,stroke-dasharray:5 5
 ```
 
 > `sentiment_norm = (sentiment_score + 100) / 2`  → 0~100 정규화
+> `macro_norm = (macro_sentiment_score + 100) / 2`  → 0~100 정규화
 
 ---
 
@@ -220,14 +225,14 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    subgraph FEAT["입력 피처 (20개)"]
+    subgraph FEAT["입력 피처 (28개)"]
         F1["변동성·추세강도<br/>atr_ratio · adx<br/>bb_width · bb_position"]
         F2["시장 상대강도<br/>rs_vs_mkt_3m"]
         F3["모멘텀·추세<br/>high_52w_ratio · mom_accel<br/>macd_diff · macd_slope_5d<br/>price_sma_5_ratio"]
         F4["finta 지표<br/>fisher · bullish_fractal_5d"]
         F5["거래량·강도<br/>mfi · vzo · obv_trend<br/>low_52w_ratio"]
         F6["극값감지·반전<br/>rsi · cci_pct"]
-        F7["거시경제<br/>vix_level · sp500_1m"]
+        F7["거시경제 (10개)<br/>vix_level · vix_change_5d<br/>sp500_1m · nasdaq_1m<br/>tnx_level · tnx_change_1m<br/>yield_spread<br/>gold_1m · oil_1m · csi300_1m"]
     end
 
     subgraph MODELS["6-모델 앙상블"]
@@ -433,7 +438,7 @@ flowchart TD
     START --> S2["중기 투자<br/>3~6개월"]
     START --> S3["장기 투자<br/>6개월+"]
 
-    S1 --> A1["AI 추천 탭 사용<br/>tech_score + ml_score + sentiment<br/>종합 점수 65+ · BUY 신호 우선"]
+    S1 --> A1["AI 추천 탭 사용<br/>tech + ml + 종목감성 + 거시감성<br/>종합 점수 45~57+ (레짐별 임계) · BUY 신호 우선"]
     S2 --> A2["가치주 추천 탭 사용<br/>value_score 60+ · F-Score 6+<br/>PER ≤ 15 · ROE ≥ 10%"]
     S3 --> A3["우량주 추천 탭 사용<br/>quality_score 70+<br/>ROE 2개년 ≥ 15% · 영업이익률 ≥ 15%"]
 
@@ -719,7 +724,7 @@ KoreanStocks/
 ├── train_models.py                      # ML 모델 재학습 스크립트
 ├── src/
 │   └── koreanstocks/
-│       ├── __init__.py                  # VERSION = "0.4.6"
+│       ├── __init__.py                  # VERSION = "0.5.0"
 │       ├── cli.py                       # Typer CLI (10개 명령어)
 │       ├── api/
 │       │   ├── app.py                   # FastAPI 앱 팩토리
@@ -782,78 +787,27 @@ KoreanStocks/
 
 ## 📝 변경 이력
 
-### v0.4.6 (2026-03-12) — FDR 타임아웃 패치 · pipx 환경 감지 · 기술 부채 해소
+### v0.5.0 (2026-03-13) — 거시경제 통합 · MacroNewsAgent · 대시보드 거시 UI · ML 28피처
 
-- 🐛 `provider.py`: `requests.Session.send` 전역 패치로 FDR DataReader read timeout 강제 (connect=10s, read=25s) — 학습 수집 hang 및 프로세스 exit hang 해결
-- 🐛 `trainer.py`: 학습 데이터 수집 글로벌 타임아웃을 고정 600s → 동적(`max(300, 종목수×3s)`)으로 개선
-- 🔧 `tcn_model.py` / `trainer.py`: pipx 격리 venv 환경 감지 → TCN(`torch`) 미설치 시 `pipx inject koreanstocks torch` 안내 자동 출력 (기존 `pip install torch` 오안내 수정)
-- 🔧 `recommendation_agent.py`: `SAVEPOINT` 인덱스 assert 추가 — 잘못된 SAVEPOINT 이름 생성 방지
-- 🔧 `provider.py`: `_naver_last_page()` · `_naver_col_indices()` · `_get_ranking_static_fallback()` 헬퍼 메서드 추출 — CC 23→8 감소
-- 🔧 `fundamental_provider.py`: `_calc_dart_ratios()` 스태틱 메서드 추출 — `_fetch_dart_financials()` CC 20→8 감소
+- ✨ `macro_news_agent.py` 신규: 거시 뉴스 감성 분석 + 레짐 감지 (`risk_on` / `uncertain` / `risk_off`)
+- ✨ ML 피처 20개 → 28개 (`vix_change_5d`, `tnx_level`, `tnx_change_1m`, `yield_spread`, `nasdaq_1m`, `gold_1m`, `oil_1m`, `csi300_1m`)
+- ✨ `GET /api/macro_context` 신설 — 레짐·감성·요약 반환
+- ✨ 대시보드 거시경제 UI — 레짐 배너 (Dashboard·AI추천 탭), 레짐 배지, 거시감성 모달 섹션
+- 🔧 종합 점수 3-케이스 확장 (`with_ml_macro: tech×0.35 + ml×0.35 + 종목감성×0.20 + 거시감성×0.10`)
+- 🐛 `trainer._fetch_macro_data()`: 2심볼 → 8심볼 전체 수집 (7개 피처 중요도 0% 버그 해결)
 
-### v0.4.5 (2026-03-12) — PyPI 배포 안전성 강화 · pipx TCN 활성화 안내 · 패키지 구조 개선
+### v0.4.x (2026-03-06 ~ 2026-03-12) — 가치·우량주 스크리너 · TCN 딥러닝 앙상블 · 히트맵 · 안정성 강화
 
-- 🔧 `pyproject.toml`: `torch>=2.0` → `torch>=2.4` — Python 3.11/3.12/3.13 공식 지원 최초 버전으로 `[dl]` extra 하한선 명확화
-- ✨ pipx 사용자를 위한 TCN 활성화 방법 추가 (`pipx install "koreanstocks[dl]"` / `pipx inject`) + 격리 venv 주의사항
-- 🔧 `core/` 하위 `__init__.py` 4개 추가 — namespace package → 명시적 regular package 전환 (wheel 호환성 향상)
-- 🐛 `tests/compat_check.py`: `pykrx` 제거, `lightgbm`·`catboost` 추가, `torch` 선택적 체크 추가
-- 🐛 `README_PYPI.md`: `-/.koreanstocks/` → `~/.koreanstocks/` 오타 수정
-
-### v0.4.4 (2026-03-11) — TCN 딥러닝 앙상블 추가 · 과적합 억제 · 추천 성과 UI 개선
-
-- ✨ `tcn_model.py` 신규: Dilated Causal Conv1D 기반 TCN 이진 분류 모델 (Walk-Forward CV + Early Stopping)
-- ✨ `trainer.py`: TCN 학습 파이프라인 통합 — 트리 모델과 병렬 수집, 크로스섹셔널 이진 라벨 생성
-- ✨ `prediction_model.py`: 6-모델 앙상블 — TCN 추론 블록 추가 (AUC 게이트 0.52, OOF calibration)
-- ✨ `models.py`: 모델 신뢰도 탭에 TCN 카드 포함 (`tcn_params.json` 읽기, logloss "N/A (딥러닝 BCE)")
-- ✨ `dashboard.js`: 추천 성과 동일 종목 Collapse UI — 최신 요약행 + 이전 이력 접기/펼치기 (`_ocToggle`)
-- 🔧 TCN 과적합 억제: `DROPOUT 0.3 → 0.4`, `weight_decay 1e-4 → 5e-4` (L2 정규화 5배 강화)
-- 🔧 `pyproject.toml`: `[project.optional-dependencies] dl = ["torch>=2.0"]` 추가 (선택적 TCN 설치)
-- 🔧 `dashboard.js`: `renderEnsembleSummary()` 모델 수 동적화, TCN 활성 표시; `renderFeatureChart()` TCN 아키텍처 정보 표시
-- 🔧 `theme.css`: `.oc-hidden { display: none }`, `.oc-sub-row` 스타일 추가
-
-### v0.4.3 (2026-03-11) — 추천 지속성 히트맵 고도화 · 성과 추적 버그 수정 · UX 개선
-
-- ✨ 히트맵 7등급 체계 완성 (SS/S/A/B/Cp/C/D) — 연속성·빈도·최대연속 종합 평가, 최신 점수 인라인 표시
-- ✨ 히트맵 D등급 재등장 배지 ("📌재등장 (총2회)") 추가
-- 🔧 히트맵 D등급 조건 완화: `dates.length >= 5` → `>= 3`
-- 🔧 히트맵 5단계 정렬: streak → maxStreak → frq → latestScore(desc) → code
-- 🔧 히트맵 미추천 셀 tooltip에 날짜 정보 추가, Cp 등급 보더 teal 색상 수정
-- 🐛 `recommendations.py`: `GET /api/recommendations/outcomes` 호출 시 `record_outcomes()` 미실행 버그 수정 — `BackgroundTasks` 적용
-- 🔧 성과 탭 8초 자동 재시도 + 🔄 수동 재시도 버튼 (데이터 수집 완료 전 빈 화면 해소)
-- 🔧 성과 조회 기간 버튼 30/90/180일 → **2개월/3개월/6개월** + "조회 기간:" 레이블 (5·10·20 거래일 측정 창과 혼동 방지)
-
-### v0.4.2 (2026-03-10) — 경고 전면 제거 · 추천 성과 추적 안정성 강화 · 코드 품질 개선
-
-- 🐛 `StandardScaler` feature names 불일치 경고 수정 (`prediction_model.py`)
-- 🐛 `pct_change(fill_method=None)` / `yf.download(auto_adjust=True)` FutureWarning 제거
-- 🐛 `SettingWithCopyWarning` 수정 — boolean 슬라이스 후 `.copy()` 추가 (`provider.py`)
-- 🔧 `outcome_tracker.py` 안정성 대폭 강화: `entry_price <= 0` 방어, `_get_date_range()` 헬퍼, DB `exc_info=True`, HORIZONS 주석 명시
-- 🔧 `database.py`: `session_date` 인덱스 추가 (`recommendations`, `recommendation_outcomes`)
-- 🔧 `dashboard.js`: `statCard()` `ev=0` 오판 버그 수정 (`!ev` → `ev == null`)
-- 🔧 API 에러 응답에서 내부 정보 마스킹 (`recommendations.py`)
-- 🔧 `cli.py` sync: 관심종목(watchlist) 자동 백업·복원
-
-### v0.4.1 (2026-03-10) — 우량주 스크리너 추가 · ML 피처 개선 · 대시보드 히트맵 개선 · UI 품질 강화
-
-- ✨ `우량주 추천` 탭 신설 (대시보드 5번째 탭) — ROE·영업이익률·YoY성장·부채비율·PBR 필터 + 우량점수 정렬, 배당수익률 표시
-- ✨ `koreanstocks quality` CLI 명령어 신설
-- ✨ `GET /api/quality_stocks` 엔드포인트 신설
-- ✨ 추천 지속성 히트맵 초기 도입 — 연속 추천(🔥)과 비연속 반복 추천(🔄/📌) 구분 배지 + 점수 범례
-- 🔧 ML 피처 3개 추가: `obv_trend`, `rsi`, `cci_pct` — 17→20개
-- 🔧 ML Walk-Forward CV: VAL_STEP 20→10 거래일 (fold ~24→~48), Purging 10→20거래일 강화
-- 🔧 ML 모델 depth 조정: RF max_depth 4→5, CatBoost depth 2→3
-- 🔧 앙상블 Softmax 가중치 정규화, Classifier·Ranker 분리 집계 (75%:25%)
-- 🐛 `bool(numpy.bool_)` JSON 직렬화 오류 수정 (Python 3.13 + NumPy 2.x 호환)
-- 📝 `docs/QUALITY_SCREENING.md` 신설
-
-### v0.4.0 (2026-03-06) — 가치주 스크리닝 기능 추가
-
-- ✨ `가치주 추천` 탭 신설 — PER·PBR·ROE·부채비율·F-Score 필터 + value_score 정렬
-- ✨ `koreanstocks value` CLI 명령어 신설
-- ✨ `GET /api/value_stocks` 엔드포인트 신설 — Piotroski F-Score + value_score 복합 정렬
-- 🐛 `fundamental_provider.py` DART 재작성 — ROE·부채비율 대차대조표에서 직접 계산
-- 🔧 `value_screener.py` 당일 인메모리 캐시 추가
-- 📝 `docs/VALUE_SCREENING.md` 신설
+- ✨ `가치주 추천` 탭 — PER·PBR·ROE·F-Score 필터 + `koreanstocks value` CLI + `GET /api/value_stocks`
+- ✨ `우량주 추천` 탭 — ROE·영업이익률·YoY성장 필터 + `koreanstocks quality` CLI + `GET /api/quality_stocks`
+- ✨ `tcn_model.py` 신규: Dilated Causal Conv1D TCN — 6-모델 앙상블 완성 (RF · GB · LGB · CB · XGBRanker · TCN)
+- ✨ 추천 지속성 히트맵 — 7등급 체계(SS/S/A/B/Cp/C/D), 연속 추천 배지, 5단계 정렬 tiebreaker
+- ✨ 추천 성과 Collapse UI, 성과 탭 자동 재시도, `target_hit` 소급 집계
+- 🔧 ML 피처 17→20개 (`obv_trend`, `rsi`, `cci_pct`), Walk-Forward CV 강화, TCN 과적합 억제
+- 🔧 FDR DataReader read timeout 전역 패치 — 학습 수집 hang 해결
+- 🔧 pipx 환경 감지 → `pipx inject koreanstocks torch` 안내 자동 출력
+- 🐛 pandas·yfinance FutureWarning 전면 제거, `SettingWithCopyWarning` 수정
+- 🐛 `fundamental_provider.py` DART 재작성 — ROE·부채비율 대차대조표 직접 계산
 
 ### v0.3.x (2026-02-28 ~ 2026-03-05) — 추천 성과 추적 · 5-모델 앙상블 · pykrx 제거
 

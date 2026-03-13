@@ -192,7 +192,8 @@ def get_model_health():
         "models": models,
         "ensemble": ensemble,
         "scoring_formula": {
-            "with_ml":    "tech×0.40 + ml×0.35 + sentiment_norm×0.25",
-            "without_ml": "tech×0.65 + sentiment_norm×0.35",
+            "with_ml_macro": "tech×0.35 + ml×0.35 + 종목감성×0.20 + 거시감성×0.10",
+            "with_ml":       "tech×0.40 + ml×0.35 + 종목감성×0.25",
+            "without_ml":    "tech×0.65 + 종목감성×0.35",
         },
     }

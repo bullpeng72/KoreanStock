@@ -297,27 +297,60 @@ MIN_STOCKS_PER_DATE = 5
 
 # ───────────────────────────── 데이터 수집 ─────────────────────────────
 
-def _fetch_macro_data(period: str) -> pd.DataFrame:
-    """yfinance로 VIX·S&P500 거시경제 데이터 수집 (학습 전 1회 호출).
+_MACRO_TRAIN_SYMBOLS = ['^VIX', '^GSPC', '^IXIC', '^TNX', '^IRX', 'GC=F', 'CL=F', '000300.SS']
 
-    Returns: DataFrame(vix_level, vix_change_5d, sp500_1m), 인덱스=날짜(tz-naive)
+
+def _fetch_macro_data(period: str) -> pd.DataFrame:
+    """yfinance로 거시경제 데이터 수집 (학습 전 1회 호출).
+
+    Returns: DataFrame(10개 거시 피처), 인덱스=날짜(tz-naive)
+      vix_level, vix_change_5d,          — VIX 레벨·변화율
+      sp500_1m, nasdaq_1m,               — 미국 증시
+      tnx_level, tnx_change_1m,          — 미국채 10Y 금리
+      yield_spread,                      — 장단기 스프레드 (10Y-3M)
+      gold_1m, oil_1m,                   — 금·유가
+      csi300_1m                          — 중국 CSI300
     """
     try:
         import yfinance as yf
-        raw = yf.download(['^VIX', '^GSPC'], period=period, progress=False)
+        raw = yf.download(_MACRO_TRAIN_SYMBOLS, period=period, progress=False, auto_adjust=True)
         if raw.empty:
             return pd.DataFrame()
-        close = raw.xs('Close', level=0, axis=1) if isinstance(raw.columns, pd.MultiIndex) else raw['Close']
-        macro = pd.DataFrame(index=close.index)
-        macro.index = pd.to_datetime(macro.index).tz_localize(None)
-        macro['vix_level']     = close['^VIX'].values
-        macro['vix_change_5d'] = close['^VIX'].pct_change(5).values
-        macro['sp500_1m']      = close['^GSPC'].pct_change(20).values
+        close = (
+            raw.xs('Close', level=0, axis=1)
+            if isinstance(raw.columns, pd.MultiIndex)
+            else raw[['Close']].rename(columns={'Close': _MACRO_TRAIN_SYMBOLS[0]})
+        )
+        _idx = pd.to_datetime(close.index)
+        macro = pd.DataFrame(
+            index=_idx.tz_convert(None) if _idx.tz is not None else _idx.tz_localize(None)
+        )
+
+        def _s(sym: str) -> pd.Series:
+            return close[sym] if sym in close.columns else pd.Series(dtype=float, index=macro.index)
+
+        vix = _s('^VIX')
+        macro['vix_level']     = vix.values
+        macro['vix_change_5d'] = vix.pct_change(5, fill_method=None).values
+        macro['sp500_1m']      = _s('^GSPC').pct_change(20, fill_method=None).values
+        macro['nasdaq_1m']     = _s('^IXIC').pct_change(20, fill_method=None).values
+
+        tnx = _s('^TNX')
+        irx = _s('^IRX')
+        macro['tnx_level']     = tnx.values
+        macro['tnx_change_1m'] = tnx.diff(20).values
+        macro['yield_spread']  = (tnx - irx).values
+
+        macro['gold_1m']       = _s('GC=F').pct_change(20, fill_method=None).values
+        macro['oil_1m']        = _s('CL=F').pct_change(20, fill_method=None).values
+        macro['csi300_1m']     = _s('000300.SS').pct_change(20, fill_method=None).values
+
         macro = macro.ffill()
-        logger.info(f"  [거시경제] VIX·S&P500 {len(macro)}개 데이터 로드 완료")
+        loaded = [c for c in macro.columns if macro[c].notna().any()]
+        logger.info(f"  [거시경제] {len(loaded)}/10개 피처 로드 완료 ({len(macro)}일)")
         return macro
     except Exception as e:
-        logger.warning(f"  [거시경제] VIX·S&P500 수집 실패: {e} — macro 피처는 0으로 채워집니다.")
+        logger.warning(f"  [거시경제] 수집 실패: {e} — macro 피처는 0으로 채워집니다.")
         return pd.DataFrame()
 
 

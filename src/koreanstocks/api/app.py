@@ -53,7 +53,10 @@ def create_app() -> FastAPI:
     @app.get("/dashboard", include_in_schema=False)
     async def dashboard():
         """인터랙티브 대시보드"""
-        return FileResponse(str(STATIC_DIR / "dashboard.html"))
+        return FileResponse(
+            str(STATIC_DIR / "dashboard.html"),
+            headers={"Cache-Control": "no-store"},
+        )
 
     return app
 

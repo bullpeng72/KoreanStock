@@ -2,7 +2,7 @@
 공유 피처 추출 로직
 ===================
 trainer.py (학습) 과 prediction_model.py (추론) 양쪽에서 import해 사용.
-BASE_FEATURE_COLS 20개만 계산 — 미사용 중간 피처 제거로 수집 속도 개선.
+BASE_FEATURE_COLS 28개 — Phase 1 거시 피처 확장 (20→28).
 
 피처 목록은 BASE_FEATURE_COLS 가 단일 소스(Single Source of Truth).
 trainer.py / prediction_model.py 는 이 목록을 import 해 사용하며,
@@ -38,10 +38,19 @@ BASE_FEATURE_COLS = [
     # ── 극값 감지 / 반전 신호 ──────────────────────────────────
     'rsi',                  # RSI rolling 14일 percentile (0~1, 레짐 독립)
     'cci_pct',              # CCI rolling 20일 percentile (레짐 독립적 0~1)
-    # ── 거시경제 ──────────────────────────────────────────────
-    'vix_level',            # VIX 공포지수
+    # ── 거시경제 기본 ─────────────────────────────────────────
+    'vix_level',            # VIX 공포지수 레벨
     'sp500_1m',             # S&P500 1개월 수익률
-]  # 20개 피처
+    # ── 거시경제 확장 (Phase 1) ───────────────────────────────
+    'vix_change_5d',        # VIX 5일 변화율 (공포 가속도)
+    'tnx_level',            # 미국채 10Y 금리 레벨 (%)
+    'tnx_change_1m',        # 금리 1개월 절대 변화 (pp)
+    'yield_spread',         # 장단기 스프레드 10Y-3M (pp, 음수=역전)
+    'nasdaq_1m',            # 나스닥 1개월 수익률 (성장주 온도계)
+    'gold_1m',              # 금 1개월 수익률 (안전자산 수요)
+    'oil_1m',               # WTI 유가 1개월 수익률 (비용·인플레이션)
+    'csi300_1m',            # 중국 CSI300 1개월 수익률 (수출·소재株 선행)
+]  # 28개 피처
 
 
 def build_features(
@@ -126,13 +135,30 @@ def build_features(
         feat['cci_pct'] = df['cci'].rolling(20, min_periods=1).rank(pct=True)
 
     # ── 거시경제 ──────────────────────────────────────────────
+    # ffill 후에도 커버되지 않는 날짜(macro 시작 이전)는 중립값으로 채움
+    # 중립값 기준: VIX=20(평균), 금리=4%(현 레짐), 스프레드=1pp(정상), 수익률=0
+    _MACRO_DEFAULTS = {
+        'vix_level':     20.0,   # VIX 장기 평균
+        'sp500_1m':       0.0,
+        'vix_change_5d':  0.0,   # 변화 없음
+        'tnx_level':      4.0,   # ~현 미국채 10Y 금리
+        'tnx_change_1m':  0.0,
+        'yield_spread':   1.0,   # 정상 스프레드 (양수)
+        'nasdaq_1m':      0.0,
+        'gold_1m':        0.0,
+        'oil_1m':         0.0,
+        'csi300_1m':      0.0,
+    }
     if macro_df is not None and not macro_df.empty:
         aligned = macro_df.reindex(feat.index).ffill()
-        # ffill 후에도 커버되지 않는 날짜(macro 시작 이전)는 중립값으로 채움
-        feat['vix_level'] = aligned['vix_level'].fillna(20.0) if 'vix_level' in aligned.columns else 20.0
-        feat['sp500_1m']  = aligned['sp500_1m'].fillna(0.0)   if 'sp500_1m'  in aligned.columns else 0.0
+        for col, default in _MACRO_DEFAULTS.items():
+            feat[col] = (
+                aligned[col].fillna(default)
+                if col in aligned.columns
+                else default
+            )
     else:
-        feat['vix_level'] = 20.0
-        feat['sp500_1m']  = 0.0
+        for col, default in _MACRO_DEFAULTS.items():
+            feat[col] = default
 
     return feat.replace([np.inf, -np.inf], np.nan).dropna()

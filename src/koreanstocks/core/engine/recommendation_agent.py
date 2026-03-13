@@ -257,6 +257,30 @@ class RecommendationAgent:
             f"rebound={result_dist.get('rebound',0)})"
         )
 
+        # ── Phase 3: 거시 레짐 기반 필터링 ─────────────────────────
+        # analysis_agent가 이미 macro_news_agent를 캐시로 호출했으므로 추가 API 호출 없음
+        from koreanstocks.core.engine.macro_news_agent import macro_news_agent
+        macro_ctx         = macro_news_agent.get_macro_context()
+        regime            = macro_ctx.get("macro_regime", "uncertain")
+
+        # 레짐별 composite_score 최소 임계값
+        _REGIME_THRESHOLD = {"risk_on": 45.0, "uncertain": 50.0, "risk_off": 57.0}
+        threshold         = _REGIME_THRESHOLD.get(regime, 50.0)
+        pre_n             = len(results)
+        pre_filter_results = results  # fallback 복원용 — 필터 전에 반드시 저장
+        results           = [r for r in results if _composite_score(r) >= threshold]
+        if len(results) < pre_n:
+            logger.info(
+                f"[레짐 필터] {regime} 임계값 {threshold} 적용: "
+                f"{pre_n} → {len(results)}종목"
+            )
+
+        if not results:
+            logger.warning(
+                f"레짐 필터({regime}) 후 후보 없음 — 임계값 완화: 전체 {pre_n}종목으로 복원"
+            )
+            results = pre_filter_results
+
         # ── 4. 버킷 쿼터 + 섹터 다양성으로 최종 선정 ───────────────
         final_recs = _apply_bucket_quota(results, limit)
         for rec in final_recs:
@@ -264,6 +288,8 @@ class RecommendationAgent:
             rec['analysis_market']  = market
             rec['composite_score']  = round(_composite_score(rec), 2)
             rec['bucket_label']     = BUCKET_LABELS.get(rec.get('bucket', BUCKET_DEFAULT), '')
+            rec['macro_regime']     = regime
+            rec['macro_regime_label'] = macro_ctx.get("macro_regime_label", "불확실")
         self._save_to_db(final_recs)
 
         # 최종 버킷 분포 로깅

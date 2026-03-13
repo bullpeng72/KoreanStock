@@ -410,6 +410,28 @@ _DATA_SOURCES = [
 ]
 
 
+@router.get("/macro_context")
+def get_macro_context():
+    """오늘의 거시경제 레짐 + 감성 점수 + 요약 (일별 캐시, 추가 API 호출 없음)."""
+    try:
+        from koreanstocks.core.engine.macro_news_agent import macro_news_agent
+        ctx = macro_news_agent.get_macro_context()
+        return {
+            "macro_regime":          ctx.get("macro_regime",          "uncertain"),
+            "macro_regime_label":    ctx.get("macro_regime_label",    "불확실"),
+            "macro_sentiment_score": ctx.get("macro_sentiment_score", 0),
+            "macro_summary":         ctx.get("macro_summary",         ""),
+        }
+    except Exception as e:
+        logger.error(f"거시 컨텍스트 조회 오류: {e}")
+        return {
+            "macro_regime":          "uncertain",
+            "macro_regime_label":    "불확실",
+            "macro_sentiment_score": 0,
+            "macro_summary":         "",
+        }
+
+
 @router.get("/market")
 def get_market(dp=Depends(get_data_provider)):
     """KOSPI / KOSDAQ / USD/KRW 지수 현황"""

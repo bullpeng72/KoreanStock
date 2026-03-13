@@ -1,7 +1,7 @@
 # 기술적 분석 시스템 기술 문서
 
-> Korean Stocks AI/ML Analysis System `v0.4.6`
-> 최종 업데이트: 2026-03-12
+> Korean Stocks AI/ML Analysis System `v0.5.0`
+> 최종 업데이트: 2026-03-13
 
 ---
 
@@ -36,7 +36,7 @@ OHLCV 데이터
   → Backtester.run()                      → 수익률·MDD·샤프 지수
 ```
 
-`tech_score`는 종합 점수(composite)의 40%(ML 모델 활성) 또는 65%(ML 없음)를 차지한다.
+`tech_score`는 종합 점수(composite)의 **35%(ML+거시감성 활성)**, **40%(ML만 활성)**, **65%(ML 없음)** 를 차지한다.
 
 ---
 
