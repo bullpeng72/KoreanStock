@@ -74,7 +74,7 @@ class Config:
     # 저장소를 포크했거나 private인 경우 KOREANSTOCKS_GITHUB_DB_URL 환경변수로 재정의
     GITHUB_RAW_DB_URL: str = os.getenv(
         "KOREANSTOCKS_GITHUB_DB_URL",
-        "https://raw.githubusercontent.com/bullpeng72/KoreanStock/main/data/storage/stock_analysis.db",
+        "https://raw.githubusercontent.com/bullpeng72/KoreanStocks/main/data/storage/stock_analysis.db",
     )
 
     # Cache Settings
