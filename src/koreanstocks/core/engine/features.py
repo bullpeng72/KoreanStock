@@ -100,6 +100,8 @@ def build_features(
     feat['mom_accel'] = _return_1m - _return_3m / 3.0
 
     if market_df is not None and not market_df.empty:
+        if market_df.index.duplicated().any():
+            market_df = market_df[~market_df.index.duplicated(keep='last')]
         aligned = market_df.reindex(feat.index).ffill()
         feat['rs_vs_mkt_3m'] = (_return_3m - aligned.get('return_3m', 0)).fillna(0)
     else:
@@ -154,6 +156,8 @@ def build_features(
         'csi300_1m':      0.0,
     }
     if macro_df is not None and not macro_df.empty:
+        if macro_df.index.duplicated().any():
+            macro_df = macro_df[~macro_df.index.duplicated(keep='last')]
         aligned = macro_df.reindex(feat.index).ffill()
         for col, default in _MACRO_DEFAULTS.items():
             feat[col] = (
