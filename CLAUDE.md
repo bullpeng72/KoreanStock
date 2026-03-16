@@ -1,4 +1,4 @@
-# Korean Stocks AI/ML Analysis System `v0.5.2`
+# Korean Stocks AI/ML Analysis System `v0.5.3`
 
 KOSPI·KOSDAQ 종목을 기술적 지표, 머신러닝, 뉴스 감성 분석으로 자동 스크리닝하고 텔레그램 리포트를 발송하는 투자 보조 플랫폼.
 
@@ -210,6 +210,13 @@ DB_PATH=data/storage/stock_analysis.db
 - GitHub Actions 스케줄 변경
 
 ## 📝 변경 이력
+
+### v0.5.3 (2026-03-16) — 모델 파라미터 조정 UI 프론트 구현 완성
+
+- ✨ `dashboard.js`: 모델 파라미터 조정 UI 추가 — 신뢰도 향상 방안 대상 모델(`overfit_gap > 0.10` 또는 `cv_auc_std > 0.05`)에만 ⚙ 파라미터 조정 버튼 표시
+- ✨ 슬라이더 UI: 파라미터명 + `기존: N` 표기, 슬라이더, 조정값(파란색) 2행 레이아웃 — 카드 너비 내 깨짐 없음
+- ✨ 💾 저장 (`POST /api/model_params/{name}`) / 🔄 초기화 (`DELETE .../override`) 즉시 반영
+- 🐛 `dashboard.html`: `?v=30` 캐시 버스팅 갱신 (파라미터 조정 UI 반영)
 
 ### v0.5.2 (2026-03-16) — 기술 부채 해소 · 상수 중앙화 · trainer 분해 · 단위 테스트 추가
 

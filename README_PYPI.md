@@ -1,6 +1,6 @@
 # 📈 Korean Stocks AI/ML Analysis System
 
-![version](https://img.shields.io/badge/version-0.5.2-blue)
+![version](https://img.shields.io/badge/version-0.5.3-blue)
 ![python](https://img.shields.io/badge/python-3.11~3.13-green)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
@@ -691,7 +691,7 @@ KoreanStocks/
 ├── train_models.py                      # ML 모델 재학습 스크립트
 ├── src/
 │   └── koreanstocks/
-│       ├── __init__.py                  # VERSION = "0.5.2"
+│       ├── __init__.py                  # VERSION = "0.5.3"
 │       ├── cli.py                       # Typer CLI (10개 명령어)
 │       ├── api/
 │       │   ├── app.py                   # FastAPI 앱 팩토리
@@ -753,6 +753,12 @@ KoreanStocks/
 ---
 
 ## 📝 변경 이력
+
+### v0.5.3 (2026-03-16) — 모델 파라미터 조정 UI 프론트 구현 완성
+
+- ✨ 신뢰도 향상 방안 대상 모델에만 ⚙ 파라미터 조정 버튼 표시 (`overfit_gap > 0.10` 또는 `cv_auc_std > 0.05`)
+- ✨ 슬라이더 2행 레이아웃 — 파라미터명 + `기존: N` + 조정값 표기, 카드 내 오버플로 수정
+- ✨ 💾 저장 / 🔄 초기화 즉시 반영 (`POST/DELETE /api/model_params/{name}`)
 
 ### v0.5.2 (2026-03-16) — 기술 부채 해소 · 상수 중앙화 · trainer 분해 · 단위 테스트 추가
 

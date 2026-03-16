@@ -2194,6 +2194,184 @@ function renderImprovementCard(models, ensemble) {
   return card;
 }
 
+// ── 파라미터 조정 UI ────────────────────────────────────────────────────────
+
+const _paramEditorState = {}; // { [modelName]: { open: bool, data: null|obj } }
+
+async function toggleParamEditor(modelName, toggleBtn, editorWrap) {
+  const state = _paramEditorState[modelName] || { open: false, data: null };
+  if (!state.open) {
+    if (!state.data) {
+      toggleBtn.textContent = "로드 중…";
+      toggleBtn.disabled = true;
+      try {
+        state.data = await api(`/api/model_params/${modelName}`);
+      } catch (e) {
+        toggleBtn.textContent = "파라미터 조정";
+        toggleBtn.disabled = false;
+        editorWrap.innerHTML = `<div style="color:var(--sell);font-size:.8em;padding:8px">오류: ${esc(e.message)}</div>`;
+        editorWrap.style.display = "block";
+        _paramEditorState[modelName] = { open: true, data: null };
+        return;
+      }
+      toggleBtn.disabled = false;
+    }
+    state.open = true;
+    toggleBtn.textContent = "파라미터 조정 닫기";
+    renderParamEditorContent(editorWrap, modelName, state.data, toggleBtn);
+    editorWrap.style.display = "block";
+  } else {
+    state.open = false;
+    toggleBtn.textContent = "파라미터 조정";
+    editorWrap.style.display = "none";
+  }
+  _paramEditorState[modelName] = state;
+}
+
+function renderParamEditorContent(wrap, modelName, data, toggleBtn) {
+  wrap.innerHTML = "";
+  if (!data || !data.editable_keys || !data.editable_keys.length) {
+    wrap.innerHTML = `<div style="font-size:.8em;color:var(--muted);padding:8px">조정 가능한 파라미터 없음</div>`;
+    return;
+  }
+
+  const baseParams  = data.parameters || {};
+  const override    = data.override   || {};
+  const hasOverride = data.has_override;
+
+  if (hasOverride) {
+    const banner = document.createElement("div");
+    banner.style.cssText = "font-size:.75em;padding:3px 7px;margin-bottom:9px;background:var(--hold)22;color:var(--hold);border:1px solid var(--hold)55;border-radius:4px";
+    banner.textContent = "⚠️ 오버라이드 적용 중 — 재학습 시 자동 병합됩니다";
+    wrap.appendChild(banner);
+  }
+
+  const inputs = {};
+  data.editable_keys.forEach(spec => {
+    const baseVal     = baseParams[spec.key];
+    const effectiveVal = (hasOverride && spec.key in override) ? override[spec.key] : baseVal;
+
+    const block = document.createElement("div");
+    block.style.cssText = "margin-bottom:10px";
+
+    // 1행: 파라미터명 + 기존값
+    const row1 = document.createElement("div");
+    row1.style.cssText = "display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px";
+
+    const label = document.createElement("span");
+    label.style.cssText = "font-size:.8em;font-weight:600;color:var(--text)";
+    label.textContent = spec.key;
+
+    const baseSpan = document.createElement("span");
+    baseSpan.style.cssText = "font-size:.75em;color:var(--muted)";
+    baseSpan.textContent = `기존: ${baseVal != null ? baseVal : "—"}`;
+
+    row1.appendChild(label);
+    row1.appendChild(baseSpan);
+
+    // 2행: 슬라이더 + 조정값
+    const row2 = document.createElement("div");
+    row2.style.cssText = "display:flex;align-items:center;gap:6px";
+
+    const input = document.createElement("input");
+    input.type  = "range";
+    input.min   = spec.min;
+    input.max   = spec.max;
+    input.step  = spec.step;
+    input.value = effectiveVal != null ? effectiveVal : (baseVal != null ? baseVal : spec.min);
+    input.style.cssText = "flex:1;min-width:0;accent-color:var(--accent)";
+
+    const valDisplay = document.createElement("span");
+    valDisplay.style.cssText = "min-width:36px;text-align:right;font-size:.85em;font-weight:700;color:var(--accent)";
+    valDisplay.textContent   = effectiveVal != null ? effectiveVal : (baseVal != null ? baseVal : spec.min);
+
+    input.addEventListener("input", () => {
+      const v = spec.type === "int"
+        ? parseInt(input.value)
+        : parseFloat(parseFloat(input.value).toFixed(2));
+      valDisplay.textContent = v;
+    });
+    inputs[spec.key] = { input, spec };
+
+    row2.appendChild(input);
+    row2.appendChild(valDisplay);
+    block.appendChild(row1);
+    block.appendChild(row2);
+    wrap.appendChild(block);
+  });
+
+  // 버튼 행
+  const btnRow = document.createElement("div");
+  btnRow.style.cssText = "display:flex;gap:6px;margin-top:12px";
+
+  // 저장 — accent solid (theme-btn.active 스타일)
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "theme-btn active";
+  saveBtn.style.cssText = "font-size:.78em;padding:3px 14px";
+  saveBtn.textContent = "저장";
+  saveBtn.addEventListener("click", async () => {
+    const payload = {};
+    for (const [key, { input, spec }] of Object.entries(inputs)) {
+      payload[key] = spec.type === "int"
+        ? parseInt(input.value)
+        : parseFloat(parseFloat(input.value).toFixed(2));
+    }
+    saveBtn.disabled = true;
+    saveBtn.textContent = "저장 중…";
+    try {
+      await api(`/api/model_params/${modelName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const fresh = await api(`/api/model_params/${modelName}`);
+      _paramEditorState[modelName].data = fresh;
+      renderParamEditorContent(wrap, modelName, fresh, toggleBtn);
+    } catch (e) {
+      saveBtn.classList.remove("active");
+      saveBtn.style.color = "var(--sell)";
+      saveBtn.textContent = "저장 실패";
+      setTimeout(() => {
+        saveBtn.classList.add("active");
+        saveBtn.style.color = "";
+        saveBtn.textContent = "저장";
+        saveBtn.disabled = false;
+      }, 2000);
+      return;
+    }
+    saveBtn.disabled = false;
+  });
+  btnRow.appendChild(saveBtn);
+
+  if (hasOverride) {
+    // 초기화 — sell 색상 outline (theme-btn 베이스에 sell 오버라이드)
+    const resetBtn = document.createElement("button");
+    resetBtn.className = "theme-btn";
+    resetBtn.style.cssText = "font-size:.78em;padding:3px 14px;border-color:var(--sell)55;color:var(--sell)";
+    resetBtn.textContent = "초기화";
+    resetBtn.addEventListener("click", async () => {
+      resetBtn.disabled = true;
+      resetBtn.textContent = "초기화 중…";
+      try {
+        await api(`/api/model_params/${modelName}/override`, { method: "DELETE" });
+        const fresh = await api(`/api/model_params/${modelName}`);
+        _paramEditorState[modelName].data = fresh;
+        renderParamEditorContent(wrap, modelName, fresh, toggleBtn);
+      } catch (e) {
+        resetBtn.textContent = "실패";
+        setTimeout(() => { resetBtn.textContent = "초기화"; resetBtn.disabled = false; }, 2000);
+      }
+    });
+    btnRow.appendChild(resetBtn);
+  }
+  wrap.appendChild(btnRow);
+
+  const note = document.createElement("div");
+  note.style.cssText = "font-size:.73em;color:var(--muted);margin-top:6px";
+  note.textContent = "저장 후 koreanstocks train 재실행 시 자동 병합됩니다.";
+  wrap.appendChild(note);
+}
+
 function renderModelCards(models, ensemble) {
   const wrap = document.createElement("div");
   wrap.className = "card";
@@ -2284,6 +2462,22 @@ function renderModelCards(models, ensemble) {
         <span class="kv-key">저장일</span>
         <span class="kv-val" style="color:var(--muted)">${savedDate} (${m.days_since_training != null ? m.days_since_training + "일 전" : "—"})</span>
       </div>`;
+
+    // 신뢰도 향상 방안 "권장" 이상 해당 모델에만 파라미터 조정 버튼 표시
+    // overfit_gap > 0.10 (즉시 조치) 또는 cv_auc_std > 0.05 (권장) — _buildImprovements 동일 기준
+    const needsParamAdjust = !isTcn && (m.overfit_gap > 0.10 || (m.cv_auc_std != null && m.cv_auc_std > 0.05));
+    if (needsParamAdjust) {
+      const paramToggleBtn = document.createElement("button");
+      paramToggleBtn.className = "theme-btn";
+      paramToggleBtn.style.cssText = "width:100%;margin-top:10px;font-size:.78em;text-align:center";
+      paramToggleBtn.textContent = "파라미터 조정";
+      const paramEditorWrap = document.createElement("div");
+      paramEditorWrap.style.cssText = "display:none;margin-top:8px;padding:10px 10px 8px;background:var(--bg-card);border-radius:6px;border:1px solid var(--border)";
+      paramToggleBtn.addEventListener("click", () => toggleParamEditor(m.name, paramToggleBtn, paramEditorWrap));
+      card.appendChild(paramToggleBtn);
+      card.appendChild(paramEditorWrap);
+    }
+
     grid.appendChild(card);
   });
 
