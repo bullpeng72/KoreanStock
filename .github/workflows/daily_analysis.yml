@@ -14,6 +14,8 @@ on:
 jobs:
   pre_check:
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
     outputs:
       should_run: ${{ steps.decide.outputs.should_run }}
 
@@ -38,7 +40,8 @@ jobs:
             --created="$TODAY" \
             --limit=20 \
             --json databaseId,conclusion \
-            --jq "[.[] | select(.databaseId != $CURRENT_RUN_ID and .conclusion == \"success\")] | length")
+            --jq "[.[] | select(.databaseId != $CURRENT_RUN_ID and .conclusion == \"success\")] | length" \
+            2>/dev/null || echo "0")
 
           if [ "$COMPLETED" -gt "0" ]; then
             echo "should_run=false" >> "$GITHUB_OUTPUT"
@@ -148,6 +151,6 @@ jobs:
           git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
           git add data/storage/stock_analysis.db
           git diff --staged --quiet || git commit -m "chore: daily DB update $(date +'%Y-%m-%d')"
-          git push
+          git push || (git pull --rebase origin main && git push)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
