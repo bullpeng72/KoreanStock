@@ -33,6 +33,7 @@ jobs:
 
           # 오늘(UTC) 동일 워크플로우에서 이미 성공 완료된 실행이 있는지 확인 (현재 실행 제외)
           COMPLETED=$(gh run list \
+            --repo "${{ github.repository }}" \
             --workflow=daily_analysis.yml \
             --created="$TODAY" \
             --limit=20 \
