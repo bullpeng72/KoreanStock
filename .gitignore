@@ -26,7 +26,6 @@ wheels/
 
 # Database
 *.db
-!data/storage/stock_analysis.db
 
 # OS
 .DS_Store
