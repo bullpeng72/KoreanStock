@@ -1,6 +1,6 @@
 # 📈 Korean Stocks AI/ML Analysis System
 
-![version](https://img.shields.io/badge/version-0.5.4-blue)
+![version](https://img.shields.io/badge/version-0.5.5-blue)
 ![python](https://img.shields.io/badge/python-3.11~3.13-green)
 ![license](https://img.shields.io/badge/license-MIT-lightgrey)
 
@@ -831,6 +831,14 @@ KoreanStocks/
 ---
 
 ## 📝 변경 이력
+
+### v0.5.5 (2026-04-03) — 추천 성과 개선 Phase 1 완성 · 버킷 분석 문서화
+
+- ✨ `analysis_agent.py`: GPT 과매수 경고 시 BUY→HOLD 자동 전환 (action_override 필드 기록)
+- ✨ `recommendation_agent.py`: 품질 필터 3종 — 거래량 6x+ 차단 · 급등+강감성 과열 차단 · KOSPI 황금조합 강제 적용
+- ✨ `recommendation_agent.py`: 세션 내 복합점수 백분위 순위(score_percentile) 산출
+- ✨ `recommendation_agent.py`: 거시 레짐별 composite_score 임계값 필터링
+- 📝 `docs/6_PERFORMANCE_IMPROVEMENT.md`: Phase 1 완료 기록 + [M-4] 버킷 비율 동적 조정 분석 추가
 
 ### v0.5.4 (2026-03-17) — 기술 부채 해소 · 브리핑 UI 개선 · 서버 안정성 강화
 

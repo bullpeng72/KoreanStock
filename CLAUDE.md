@@ -1,4 +1,4 @@
-# Korean Stocks AI/ML Analysis System `v0.5.4`
+# Korean Stocks AI/ML Analysis System `v0.5.5`
 
 KOSPI·KOSDAQ 종목을 기술적 지표, 머신러닝, 뉴스 감성 분석으로 자동 스크리닝하고 텔레그램 리포트를 발송하는 투자 보조 플랫폼.
 
@@ -210,6 +210,14 @@ DB_PATH=data/storage/stock_analysis.db
 - GitHub Actions 스케줄 변경
 
 ## 📝 변경 이력
+
+### v0.5.5 (2026-04-03) — 추천 성과 개선 Phase 1 완성 · 버킷 분석 문서화
+
+- ✨ `analysis_agent.py`: GPT 과매수 경고 시 BUY→HOLD 자동 전환 (`action_override` 필드로 이유 기록)
+- ✨ `recommendation_agent.py`: 품질 필터 3종 추가 — 거래량 폭증(6x+) 차단 · 급등+강감성 과열 차단 · KOSPI 황금조합 조건 강제 (정답률 35%→75%)
+- ✨ `recommendation_agent.py`: 세션 내 복합점수 백분위 순위(`score_percentile`) 산출 — 절대값 집중 구간(64~92점) 변별력 보완
+- ✨ `recommendation_agent.py`: 거시 레짐별 composite_score 임계값 필터링 (risk_on: 45 / uncertain: 50 / risk_off: 57)
+- 📝 `docs/6_PERFORMANCE_IMPROVEMENT.md`: Phase 1 구현 완료 기록 + [M-4] 버킷 비율 동적 조정 항목 추가 (2026-04-30 이후 버킷별 n≥30 누적 후 재검토 조건 명시)
 
 ### v0.5.4 (2026-03-17) — 기술 부채 해소 · 브리핑 UI 개선 · 서버 안정성 강화
 
