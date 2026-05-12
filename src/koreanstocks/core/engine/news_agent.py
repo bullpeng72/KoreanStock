@@ -456,7 +456,7 @@ class NewsAgent:
                     ],
                     response_format={"type": "json_object"},
                     temperature=0.1,   # 일관된 감성 점수 산출
-                    max_tokens=200,
+                    max_completion_tokens=200,
                 )
                 result = json.loads(response.choices[0].message.content)
                 # 감성 점수 범위 클램핑 (-100~100 보장)

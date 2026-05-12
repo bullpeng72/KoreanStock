@@ -168,7 +168,7 @@ class MacroNewsAgent:
                     ],
                     response_format={"type": "json_object"},
                     temperature=0.1,
-                    max_tokens=120,
+                    max_completion_tokens=120,
                 )
                 data = json.loads(resp.choices[0].message.content)
                 score = max(-100, min(100, int(float(data.get("macro_sentiment_score", 0)))))

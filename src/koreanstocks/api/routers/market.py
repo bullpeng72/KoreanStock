@@ -144,7 +144,7 @@ def _chk_openai():
     resp = client.chat.completions.create(
         model=config.DEFAULT_MODEL,
         messages=[{"role": "user", "content": "ping"}],
-        max_tokens=1,
+        max_completion_tokens=1,
     )
     model = resp.model
     return {"status": "ok", "detail": f"{model} 응답 정상"}
